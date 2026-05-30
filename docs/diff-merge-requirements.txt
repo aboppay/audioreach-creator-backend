@@ -1,0 +1,62 @@
+Read through the persistence layer to understand the data base.
+At high level, i'll explain the data structure
+
+1. Acdb file has a list of usecases.
+2. A usecase has list of subgraphs and subgraph pairs.
+3. A subgraph has a list of module, data-links and control-links
+4. Subgraph pair has data-links and control-links.
+
+The task is to compare two acdb files and come up with comparison.
+
+We have to support two modes.
+1. Two way comparison (reference to target)
+2. Three way comparison (reference - base = delta. Delta + target = mergedFile)
+3. Create patch file: Delta between two files. Apply patch file: Delta applied onto any target file.
+
+Between two files, here is one way to compare. Based on requirements, if you have better suggestions we can discuss.
+
+- Subgraph IDs, module instance Ids etc can change between files.
+- Usecases are the keys to identify.
+- Based on usecases, we need to come up with subgraph map for comparison.
+- From comparison perspective, there can be several scenarios
+
+One-to-one
+Ref: UC1: SG1 -> SG2
+Tar: UC1: SG3 -> SG4
+
+One to many
+Ref: UC1: SG1 -> SG2
+Ref: UC2: SG1 -> SG20
+
+Tar: UC1: SG3 -> SG4
+Tar: UC2: SG5 -> SG6
+
+Many to one
+Ref: UC1: SG3 -> SG4
+Ref: UC2: SG5 -> SG6
+
+Tar: UC1: SG1 -> SG2
+Tar: UC2: SG1 -> SG20
+
+Many to many as well.
+
+Based on statistics, we can come up with best match for subgraphs.
+
+Subgraph comparison is based on module sequence
+
+Ref SG1: M1 -> M2 -> M3
+Tar SG1: M11 -> M22 -> M33
+
+ModuleDefinitionId is same can be treated as same module for comparison.
+
+Same comparison logic can for two way/three way merge and create/apply patch.
+Otherwise we can go with different solutions if needed. Mainly, patch file should have info
+so that we can map it with any target file.
+
+Customers can customize their ACDB files. So sometimes, an action from delta file will not be present in target file
+So we have to take care of it as well.
+
+In two-way comparision, customers can give info of their customization using which we can use that
+information to not generate such actions as delta  (Otherwise, customer customizations will be lost)
+
+Tell me what you understood before we proceed. Lets have a discussion.
