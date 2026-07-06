@@ -160,6 +160,12 @@ export interface UsecaseDataDownloadModel {
     sourceSubgraphId: number;
     destSubgraphId: number;
   }>;
+
+  /** Usecase alias ID (natural ID stored in use_cases.alias_id). Optional — absent for files without GALS chunk. */
+  aliasId?: number;
+
+  /** Usecase alias name (stored in use_cases.alias). Optional — absent when no name was set. */
+  alias?: string;
 }
 
 /**
@@ -471,6 +477,7 @@ export interface DownloadEntities {
   subgraphData?: SubgraphDownloadModel[];
   containerData?: ContainerDownloadModel[];
   calibrationData?: CalibrationDataDownloadModel[];
+  vcpmCalibrationData?: CalibrationDataDownloadModel[];
   tagKeys?: TagKeysDownloadModel[];
   tagData?: TagDataDownloadModel[];
   taggedModules?: TaggedModuleDownloadModel[];
@@ -545,6 +552,24 @@ export interface BulkReadQueryService {
   readCalibrationData(
     fileSystemId: number,
   ): Promise<CalibrationDataDownloadModel[]>;
+
+  /**
+   * Read VCPM calibration data from vcpm_ckv / vcpm_parameter_payload tables.
+   * Returns data structured identically to readCalibrationData() so it can be
+   * passed directly to VoiceCalibrationChunkBuilder.
+   *
+   * moduleInstanceId is always SPF_VCPM_MODULE_ID (4) for all returned entries.
+   * pidType is '' (unused by voice builder).
+   *
+   * Sorting order (must match voice-CKV contract):
+   * 1. subgraphId ASC
+   * 2. keyIds lexicographic ASC
+   * 3. valueIds lexicographic ASC
+   * 4. parameterId ASC
+   *
+   * @param fileSystemId - The file system ID to scope the query
+   */
+  readVcpmCalibrationData(fileSystemId: number): Promise<CalibrationDataDownloadModel[]>;
 
   readTagKeys(fileSystemId: number): Promise<TagKeysDownloadModel[]>;
   readTagData(fileSystemId: number): Promise<TagDataDownloadModel[]>;

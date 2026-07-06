@@ -35,7 +35,12 @@ import type {
   ContainerTypeDefinitionDownloadModel,
   Logger,
 } from '@arc/core';
-import {compareNumberArrays, LINK_TYPE, PORT_IO_TYPE} from '@arc/core';
+import {
+  compareNumberArrays,
+  LINK_TYPE,
+  PORT_IO_TYPE,
+  SPF_VCPM_MODULE_ID,
+} from '@arc/core';
 import type {DataSource, SelectQueryBuilder, ObjectLiteral} from 'typeorm';
 import {DbFileQuery} from '../db-file-query.js';
 import {ENTITY_NAMES} from '../../entity-schema/entity-table-names.js';
@@ -83,6 +88,11 @@ import type {ModulePropertyRow} from '../../entity-schema/definitions/module/spf
 import type {ProcessorDefinitionRow} from '../../entity-schema/definitions/common/processor-definition.schema.js';
 import type {ContainerTypeRow} from '../../entity-schema/definitions/container/container-definition.schema.js';
 import type {ConfigurationRow} from '../../entity-schema/project-data/configuration.schema.js';
+import type {
+  VcpmCkvRow,
+  VcpmCkvValuesRow,
+  VcpmParameterPayloadRow,
+} from '../../entity-schema/usecase-data/subgraph/subgraph-vcpm-data.js';
 
 /**
  * TypeORM implementation of BulkReadQueryService.
@@ -132,6 +142,7 @@ export class TypeOrmBulkReadQueryService implements BulkReadQueryService {
       tagData,
       taggedModules,
       driverCalibrationData,
+      vcpmCalibrationData,
       configurationData,
       keyDefinitions,
       tagDefinitions,
@@ -153,6 +164,10 @@ export class TypeOrmBulkReadQueryService implements BulkReadQueryService {
       timed(
         'readDriverCalibrationData',
         this.readDriverCalibrationData(fileSystemId),
+      ),
+      timed(
+        'readVcpmCalibrationData',
+        this.readVcpmCalibrationData(fileSystemId),
       ),
       timed('readConfiguration', this.readConfiguration(fileSystemId)),
       timed('readKeyDefinitions', this.readKeyDefinitions(fileSystemId)),
@@ -193,6 +208,7 @@ export class TypeOrmBulkReadQueryService implements BulkReadQueryService {
       tagData,
       taggedModules,
       driverCalibrationData,
+      vcpmCalibrationData,
       configurationData: configurationData ?? undefined,
       keyDefinitions,
       tagDefinitions,
@@ -252,6 +268,8 @@ export class TypeOrmBulkReadQueryService implements BulkReadQueryService {
         .map(sg => sg.subgraphId)
         .sort((a, b) => a - b),
       subgraphPairs: pairsMap.get(uc.systemId) ?? [],
+      aliasId: uc.aliasId || undefined,
+      alias: uc.alias || undefined,
     }));
   }
 
@@ -846,6 +864,178 @@ export class TypeOrmBulkReadQueryService implements BulkReadQueryService {
 
       currentKvCombo.modules.push({
         moduleInstanceId: ckv.module!.instanceId,
+        parameters: paramMap.get(ckv.systemId) ?? [],
+      });
+    }
+
+    for (const sg of result) {
+      const mkMap = masterKeyTracker.get(sg.subgraphId)!;
+      sg.masterKeys = [...mkMap.entries()]
+        .sort(([a], [b]) => a - b)
+        .map(([keyId, isDynamic]) => ({keyId, isDynamic}));
+    }
+
+    return result;
+  }
+
+  // ─── VCPM Calibration ────────────────────────────────────────────────────────
+
+  async readVcpmCalibrationData(
+    fileSystemId: number,
+  ): Promise<CalibrationDataDownloadModel[]> {
+    const ckvRows = await this.fetchAllVcpmCkvEntries(fileSystemId);
+    if (ckvRows.length === 0) return [];
+
+    const vcpmCkvIds = ckvRows.map(r => r.systemId);
+
+    const [valRows, paramRows] = await Promise.all([
+      this.fetchVcpmCkvValues(vcpmCkvIds),
+      this.fetchVcpmParameterPayloads(vcpmCkvIds),
+    ]);
+
+    const valMap = new Map<number, VcpmCkvValuesRow[]>();
+    for (const v of valRows) {
+      if (!valMap.has(v.vcpmCkvSystemId)) valMap.set(v.vcpmCkvSystemId, []);
+      valMap.get(v.vcpmCkvSystemId)!.push(v);
+    }
+    for (const ckv of ckvRows) {
+      (ckv as VcpmCkvRow & {values: VcpmCkvValuesRow[]}).values =
+        valMap.get(ckv.systemId) ?? [];
+    }
+
+    const sorted = this.sortVcpmCkvEntries(ckvRows);
+    return this.buildVcpmCalibrationModels(sorted, paramRows);
+  }
+
+  private async fetchAllVcpmCkvEntries(
+    fileSystemId: number,
+  ): Promise<VcpmCkvRow[]> {
+    return this.dataSource
+      .getRepository(ENTITY_NAMES.VcpmCkv)
+      .createQueryBuilder('vckv')
+      .innerJoinAndSelect('vckv.vcpmInstance', 'vi')
+      .innerJoinAndSelect('vi.subgraph', 'sg')
+      .where('sg.fileSystemId = :fileSystemId', {fileSystemId})
+      .orderBy('sg.subgraphId', 'ASC')
+      .getMany() as Promise<VcpmCkvRow[]>;
+  }
+
+  private fetchVcpmCkvValues(
+    vcpmCkvIds: number[],
+  ): Promise<VcpmCkvValuesRow[]> {
+    return this.queryInChunks(vcpmCkvIds, ids =>
+      this.dataSource
+        .getRepository(ENTITY_NAMES.VcpmCkvValues)
+        .createQueryBuilder('vcv')
+        .leftJoinAndSelect('vcv.valueDef', 'vd')
+        .leftJoinAndSelect('vd.keys', 'k')
+        .where('vcv.vcpmCkvSystemId IN (:...ids)', {ids}),
+    ) as Promise<VcpmCkvValuesRow[]>;
+  }
+
+  private fetchVcpmParameterPayloads(
+    vcpmCkvIds: number[],
+  ): Promise<VcpmParameterPayloadRow[]> {
+    return this.queryInChunks(vcpmCkvIds, ids =>
+      this.dataSource
+        .getRepository(ENTITY_NAMES.VcpmParameterPayload)
+        .createQueryBuilder('vpp')
+        .leftJoinAndSelect('vpp.vcpmParameter', 'param')
+        .where('vpp.vcpmCkvSystemId IN (:...ids)', {ids})
+        .orderBy('vpp.vcpmCkvSystemId', 'ASC')
+        .addOrderBy('param.paramId', 'ASC'),
+    ) as Promise<VcpmParameterPayloadRow[]>;
+  }
+
+  private sortVcpmCkvEntries(entries: VcpmCkvRow[]): VcpmCkvRow[] {
+    type Augmented = VcpmCkvRow & {values: VcpmCkvValuesRow[]};
+    const prepared = (entries as Augmented[]).map(e => ({
+      entry: e,
+      vals: [...(e.values ?? [])].sort(
+        (x, y) => (x.valueDef?.keys?.keyId ?? 0) - (y.valueDef?.keys?.keyId ?? 0),
+      ),
+    }));
+
+    prepared.sort((a, b) => {
+      const sgA = a.entry.vcpmInstance?.subgraph?.subgraphId ?? 0;
+      const sgB = b.entry.vcpmInstance?.subgraph?.subgraphId ?? 0;
+      if (sgA !== sgB) return sgA - sgB;
+
+      const keyDiff = compareNumberArrays(
+        a.vals.map(v => v.valueDef?.keys?.keyId ?? 0),
+        b.vals.map(v => v.valueDef?.keys?.keyId ?? 0),
+      );
+      if (keyDiff !== 0) return keyDiff;
+      return compareNumberArrays(
+        a.vals.map(v => v.valueDef?.valueId ?? 0),
+        b.vals.map(v => v.valueDef?.valueId ?? 0),
+      );
+    });
+
+    return prepared.map(p => p.entry);
+  }
+
+  private buildVcpmCalibrationModels(
+    sortedEntries: VcpmCkvRow[],
+    paramRows: VcpmParameterPayloadRow[],
+  ): CalibrationDataDownloadModel[] {
+    type Augmented = VcpmCkvRow & {values: VcpmCkvValuesRow[]};
+
+    const paramMap = new Map<
+      number,
+      Array<{parameterId: number; payload: Uint8Array; pidType: string}>
+    >();
+    for (const row of paramRows) {
+      if (!paramMap.has(row.vcpmCkvSystemId)) paramMap.set(row.vcpmCkvSystemId, []);
+      paramMap.get(row.vcpmCkvSystemId)!.push({
+        parameterId: row.vcpmParameter!.paramId,
+        payload: row.payload!,
+        pidType: '',
+      });
+    }
+
+    const result: CalibrationDataDownloadModel[] = [];
+    let currentSg: CalibrationDataDownloadModel | null = null;
+    let currentKvCombo:
+      | CalibrationDataDownloadModel['keyValueCombinations'][0]
+      | null = null;
+    const masterKeyTracker = new Map<number, Map<number, boolean>>();
+
+    for (const ckv of sortedEntries as Augmented[]) {
+      const subgraphId = ckv.vcpmInstance!.subgraph!.subgraphId;
+      const vals = [...(ckv.values ?? [])].sort(
+        (x, y) => (x.valueDef?.keys?.keyId ?? 0) - (y.valueDef?.keys?.keyId ?? 0),
+      );
+
+      const keyIds = vals.map(v => v.valueDef!.keys.keyId);
+      const valueIds = vals.map(v => v.valueDef!.valueId);
+
+      if (!currentSg || currentSg.subgraphId !== subgraphId) {
+        currentSg = {subgraphId, masterKeys: [], keyValueCombinations: []};
+        result.push(currentSg);
+        currentKvCombo = null;
+        masterKeyTracker.set(subgraphId, new Map());
+      }
+
+      const mkMap = masterKeyTracker.get(subgraphId)!;
+      for (const val of vals) {
+        const keyId = val.valueDef!.keys.keyId;
+        if (!mkMap.has(keyId)) {
+          mkMap.set(keyId, val.valueDef!.keys.isDynamic ?? false);
+        }
+      }
+
+      if (
+        !currentKvCombo ||
+        compareNumberArrays(currentKvCombo.keyIds, keyIds) !== 0 ||
+        compareNumberArrays(currentKvCombo.valueIds, valueIds) !== 0
+      ) {
+        currentKvCombo = {keyIds, valueIds, modules: []};
+        currentSg.keyValueCombinations.push(currentKvCombo);
+      }
+
+      currentKvCombo.modules.push({
+        moduleInstanceId: SPF_VCPM_MODULE_ID,
         parameters: paramMap.get(ckv.systemId) ?? [],
       });
     }
