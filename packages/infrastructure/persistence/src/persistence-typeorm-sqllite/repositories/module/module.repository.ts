@@ -11,19 +11,25 @@ import type {
   SpfModuleBase,
   ExistingPayloadRow,
   CkvPayloadUpdate,
+  CkvSummary,
+  TagSummary,
+  TkvSummary,
 } from '@arc/core';
-import {SpfModule, DataPort, ControlPort} from '@arc/core';
+import {SpfModule, DataPort, ControlPort, CONFIGURATION_INCLUDES} from '@arc/core';
+import type {KvData} from '@arc/core';
 import type {PendingChangeWriter} from '../../services/pending-change-writer.js';
 import {ENTITY_NAMES} from '../../entity-schema/entity-table-names.js';
 import {ModuleNodeOverlayFetcher} from '../../fetchers/module-node-overlay-fetcher.js';
 import {PortOverlayFetcher} from '../../fetchers/port-overlay-fetcher.js';
 import {CkvOverlayFetcher} from '../../fetchers/ckv-overlay-fetcher.js';
+import {TkvOverlayFetcher} from '../../fetchers/tkv-overlay-fetcher.js';
 import {EditActionsQueryService} from '../../queries/edit-session/edit-actions-query-service.js';
 
 export class TypeOrmModuleRepository implements ModuleRepository {
   private readonly moduleNodeFetcher: ModuleNodeOverlayFetcher;
   private readonly portFetcher: PortOverlayFetcher;
   private readonly ckvOverlayFetcher: CkvOverlayFetcher;
+  private readonly tkvOverlayFetcher: TkvOverlayFetcher;
 
   constructor(
     private readonly writer: PendingChangeWriter,
@@ -37,6 +43,7 @@ export class TypeOrmModuleRepository implements ModuleRepository {
     );
     this.portFetcher = new PortOverlayFetcher(manager, editActionsQs);
     this.ckvOverlayFetcher = new CkvOverlayFetcher(manager, editActionsQs);
+    this.tkvOverlayFetcher = new TkvOverlayFetcher(manager, editActionsQs);
   }
 
   async findModuleForPatch(
@@ -391,14 +398,410 @@ export class TypeOrmModuleRepository implements ModuleRepository {
     }
   }
 
-  createCkv(
-    _kvData: unknown,
-    _moduleSystemId: number,
-    _options?: EditOptions,
+  async createCkv(
+    kvData: KvData,
+    moduleSystemId: number,
+    options?: EditOptions,
   ): Promise<void> {
-    // TODO(add-module-calibration-defaults): stage CKV CREATE row + all
-    // CkvParameterPayload CREATE rows in FK order.
-    // See: docs/edit-crud/design/add-module-calibration-defaults-design.md §6
-    return Promise.reject(new Error('createCkv: not yet implemented'));
+    const {session, groupId} = this.uow.getWriteContext();
+    // FK order: Ckv first, then CkvParameterPayload children
+    await this.writer.writeCreate(
+      {
+        targetTable: ENTITY_NAMES.Ckv,
+        targetSystemId: kvData.systemId,
+        aggregateId: moduleSystemId,
+        payload: {
+          spfModuleSystemId: moduleSystemId,
+          uiPersistence: kvData.uiPersistence,
+          valueDefinitionSystemIds: kvData.valueDefinitionSystemIds,
+          fileSystemId: session.fileSystemId,
+        },
+        ...options,
+      },
+      session.sessionId,
+      groupId,
+      this.manager,
+    );
+    for (const param of kvData.parameterPayloads) {
+      await this.writer.writeCreate(
+        {
+          targetTable: ENTITY_NAMES.CkvParameterPayload,
+          targetSystemId: param.payloadSystemId,
+          aggregateId: moduleSystemId,
+          payload: {
+            ckvSystemId: kvData.systemId,
+            parameterSystemId: param.paramDefintionSystemId,
+            payload: param.getPayloadCopy(),
+            fileSystemId: session.fileSystemId,
+          },
+          ...options,
+        },
+        session.sessionId,
+        groupId,
+        this.manager,
+      );
+    }
+  }
+
+  async getAllCkvsForModule(
+    spfModuleSystemId: number,
+    _fileSystemId: number,
+  ): Promise<CkvSummary[]> {
+    const sessionId = this.uow.getWriteContext().session.sessionId;
+    const overlaid = await this.ckvOverlayFetcher.fetchForModule(
+      spfModuleSystemId,
+      sessionId,
+    );
+    return overlaid.map(r => ({
+      systemId: r.systemId,
+      spfModuleSystemId,
+      valueDefinitionSystemIds: r.values.map(v => v.valueDefSystemId),
+    }));
+  }
+
+  async getCkvParameterPayloads(
+    ckvSystemId: number,
+    spfModuleSystemId: number,
+  ): Promise<ExistingPayloadRow[]> {
+    const sessionId = this.uow.getWriteContext().session.sessionId;
+    const rows = await this.ckvOverlayFetcher.fetchCkvPayloads(
+      ckvSystemId,
+      spfModuleSystemId,
+      sessionId,
+    );
+    return rows.map(r => ({
+      systemId: r.systemId,
+      parameterSystemId: r.parameterSystemId,
+    }));
+  }
+
+  async removeCkv(
+    ckvSystemId: number,
+    moduleSystemId: number,
+    options?: EditOptions,
+  ): Promise<void> {
+    const {session, groupId} = this.uow.getWriteContext();
+    await this.writer.writeDelete(
+      {
+        targetTable: ENTITY_NAMES.Ckv,
+        targetSystemId: ckvSystemId,
+        aggregateId: moduleSystemId,
+        ...options,
+      },
+      session.sessionId,
+      groupId,
+      this.manager,
+    );
+  }
+
+  async getZeroCkv(spfModuleSystemId: number): Promise<CkvSummary | null> {
+    const sessionId = this.uow.getWriteContext().session.sessionId;
+    const overlaid = await this.ckvOverlayFetcher.fetchForModule(
+      spfModuleSystemId,
+      sessionId,
+    );
+    const zero = overlaid.find(r => r.values.length === 0);
+    if (!zero) return null;
+    return {systemId: zero.systemId, spfModuleSystemId, valueDefinitionSystemIds: []};
+  }
+
+  async getAllTagsForModule(
+    spfModuleSystemId: number,
+    _fileSystemId: number,
+  ): Promise<TagSummary[]> {
+    const sessionId = this.uow.getWriteContext().session.sessionId;
+    const rows = await this.tkvOverlayFetcher.fetchForModule(
+      spfModuleSystemId,
+      sessionId,
+      CONFIGURATION_INCLUDES.Summary,
+    );
+    return rows.map(r => ({
+      systemId: r.systemId,
+      spfModuleSystemId,
+      tagDefinitionSystemId: r.tagDefinitionSystemId,
+    }));
+  }
+
+  async getTagBySystemId(
+    tagSystemId: number,
+    spfModuleSystemId: number,
+  ): Promise<TagSummary | null> {
+    const sessionId = this.uow.getWriteContext().session.sessionId;
+    const rows = await this.tkvOverlayFetcher.fetchForModule(
+      spfModuleSystemId,
+      sessionId,
+      CONFIGURATION_INCLUDES.Summary,
+    );
+    const match = rows.find(r => r.systemId === tagSystemId);
+    if (!match) return null;
+    return {
+      systemId: match.systemId,
+      spfModuleSystemId,
+      tagDefinitionSystemId: match.tagDefinitionSystemId,
+    };
+  }
+
+  async createTag(
+    tagSystemId: number,
+    spfModuleSystemId: number,
+    tagDefinitionSystemId: number,
+    options?: EditOptions,
+  ): Promise<void> {
+    const {session, groupId} = this.uow.getWriteContext();
+    await this.writer.writeCreate(
+      {
+        targetTable: ENTITY_NAMES.ModuleTagIdMap,
+        targetSystemId: tagSystemId,
+        aggregateId: spfModuleSystemId,
+        payload: {
+          spfModuleSystemId,
+          tagDefinitionSystemId,
+          fileSystemId: session.fileSystemId,
+        },
+        ...options,
+      },
+      session.sessionId,
+      groupId,
+      this.manager,
+    );
+  }
+
+  async removeTag(
+    tagSystemId: number,
+    moduleSystemId: number,
+    options?: EditOptions,
+  ): Promise<void> {
+    const {session, groupId} = this.uow.getWriteContext();
+    await this.writer.writeDelete(
+      {
+        targetTable: ENTITY_NAMES.ModuleTagIdMap,
+        targetSystemId: tagSystemId,
+        aggregateId: moduleSystemId,
+        ...options,
+      },
+      session.sessionId,
+      groupId,
+      this.manager,
+    );
+  }
+
+  async getAllTkvsForTag(
+    tagSystemId: number,
+    _fileSystemId: number,
+  ): Promise<TkvSummary[]> {
+    const sessionId = this.uow.getWriteContext().session.sessionId;
+    const tagRow = (await this.manager
+      .getRepository(ENTITY_NAMES.ModuleTagIdMap)
+      .findOne({where: {systemId: tagSystemId}})) as {
+      systemId: number;
+      spfModuleSystemId: number;
+    } | null;
+    if (!tagRow) return [];
+    const allTagMaps = await this.tkvOverlayFetcher.fetchForModule(
+      tagRow.spfModuleSystemId,
+      sessionId,
+      CONFIGURATION_INCLUDES.Summary,
+    );
+    const matchingTag = allTagMaps.find(t => t.systemId === tagSystemId);
+    if (!matchingTag) return [];
+    return matchingTag.tkvs.map(tkv => ({
+      systemId: tkv.systemId,
+      moduleTagIdMapSystemId: tagSystemId,
+      valueDefinitionSystemIds: tkv.values.map(v => v.valueDefSystemId),
+    }));
+  }
+
+  async getTkvBySystemId(
+    tkvSystemId: number,
+    tagSystemId: number,
+  ): Promise<TkvSummary | null> {
+    const tkvs = await this.getAllTkvsForTag(tagSystemId, 0);
+    return tkvs.find(t => t.systemId === tkvSystemId) ?? null;
+  }
+
+  async createTkv(
+    kvData: KvData,
+    tagSystemId: number,
+    moduleSystemId: number,
+    options?: EditOptions,
+  ): Promise<void> {
+    const {session, groupId} = this.uow.getWriteContext();
+    await this.writer.writeCreate(
+      {
+        targetTable: ENTITY_NAMES.Tkv,
+        targetSystemId: kvData.systemId,
+        aggregateId: moduleSystemId,
+        payload: {
+          moduleTagIdMapSystemId: tagSystemId,
+          uiPersistence: kvData.uiPersistence,
+          valueDefinitionSystemIds: kvData.valueDefinitionSystemIds,
+          fileSystemId: session.fileSystemId,
+        },
+        ...options,
+      },
+      session.sessionId,
+      groupId,
+      this.manager,
+    );
+    for (const param of kvData.parameterPayloads) {
+      await this.writer.writeCreate(
+        {
+          targetTable: ENTITY_NAMES.TkvParameterPayload,
+          targetSystemId: param.payloadSystemId,
+          aggregateId: moduleSystemId,
+          payload: {
+            tkvSystemId: kvData.systemId,
+            parameterSystemId: param.paramDefintionSystemId,
+            payload: param.getPayloadCopy(),
+            fileSystemId: session.fileSystemId,
+          },
+          ...options,
+        },
+        session.sessionId,
+        groupId,
+        this.manager,
+      );
+    }
+  }
+
+  async removeTkv(
+    tkvSystemId: number,
+    moduleSystemId: number,
+    options?: EditOptions,
+  ): Promise<void> {
+    const {session, groupId} = this.uow.getWriteContext();
+    await this.writer.writeDelete(
+      {
+        targetTable: ENTITY_NAMES.Tkv,
+        targetSystemId: tkvSystemId,
+        aggregateId: moduleSystemId,
+        ...options,
+      },
+      session.sessionId,
+      groupId,
+      this.manager,
+    );
+  }
+
+  async getAllCkvParameterPayloads(
+    spfModuleSystemId: number,
+  ): Promise<Map<number, ExistingPayloadRow[]>> {
+    const sessionId = this.uow.getWriteContext().session.sessionId;
+    const ckvsOverlaid = await this.ckvOverlayFetcher.fetchForModule(
+      spfModuleSystemId,
+      sessionId,
+    );
+    const result = new Map<number, ExistingPayloadRow[]>();
+    for (const ckv of ckvsOverlaid) {
+      const payloads = await this.ckvOverlayFetcher.fetchCkvPayloads(
+        ckv.systemId,
+        spfModuleSystemId,
+        sessionId,
+      );
+      result.set(
+        ckv.systemId,
+        payloads.map(p => ({
+          systemId: p.systemId,
+          parameterSystemId: p.parameterSystemId,
+        })),
+      );
+    }
+    return result;
+  }
+
+  async addParameterToCkv(
+    ckvSystemId: number,
+    moduleSystemId: number,
+    parameterSystemId: number,
+    payloadSystemId: number,
+    payload: Uint8Array,
+    options?: EditOptions,
+  ): Promise<void> {
+    const {session, groupId} = this.uow.getWriteContext();
+    await this.writer.writeCreate(
+      {
+        targetTable: ENTITY_NAMES.CkvParameterPayload,
+        targetSystemId: payloadSystemId,
+        aggregateId: moduleSystemId,
+        payload: {
+          ckvSystemId,
+          parameterSystemId,
+          payload,
+          fileSystemId: session.fileSystemId,
+        },
+        ...options,
+      },
+      session.sessionId,
+      groupId,
+      this.manager,
+    );
+  }
+
+  async removeParameterFromCkv(
+    payloadSystemId: number,
+    _ckvSystemId: number,
+    moduleSystemId: number,
+    options?: EditOptions,
+  ): Promise<void> {
+    const {session, groupId} = this.uow.getWriteContext();
+    await this.writer.writeDelete(
+      {
+        targetTable: ENTITY_NAMES.CkvParameterPayload,
+        targetSystemId: payloadSystemId,
+        aggregateId: moduleSystemId,
+        ...options,
+      },
+      session.sessionId,
+      groupId,
+      this.manager,
+    );
+  }
+
+  async addParameterToTkv(
+    tkvSystemId: number,
+    moduleSystemId: number,
+    parameterSystemId: number,
+    payloadSystemId: number,
+    payload: Uint8Array,
+    options?: EditOptions,
+  ): Promise<void> {
+    const {session, groupId} = this.uow.getWriteContext();
+    await this.writer.writeCreate(
+      {
+        targetTable: ENTITY_NAMES.TkvParameterPayload,
+        targetSystemId: payloadSystemId,
+        aggregateId: moduleSystemId,
+        payload: {
+          tkvSystemId,
+          parameterSystemId,
+          payload,
+          fileSystemId: session.fileSystemId,
+        },
+        ...options,
+      },
+      session.sessionId,
+      groupId,
+      this.manager,
+    );
+  }
+
+  async removeParameterFromTkv(
+    payloadSystemId: number,
+    _tkvSystemId: number,
+    moduleSystemId: number,
+    options?: EditOptions,
+  ): Promise<void> {
+    const {session, groupId} = this.uow.getWriteContext();
+    await this.writer.writeDelete(
+      {
+        targetTable: ENTITY_NAMES.TkvParameterPayload,
+        targetSystemId: payloadSystemId,
+        aggregateId: moduleSystemId,
+        ...options,
+      },
+      session.sessionId,
+      groupId,
+      this.manager,
+    );
   }
 }
