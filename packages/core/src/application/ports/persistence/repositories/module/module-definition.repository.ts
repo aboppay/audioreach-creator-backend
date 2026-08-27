@@ -8,6 +8,7 @@ import type {SpfModuleDefinition} from '../../../../../domain/entities/definitio
 export interface ParameterDefinitionBase {
   systemId: number;
   elementsStructure: string; // JSON — parsed by serializeParameterData
+  toolPolicy: string; // First entry of spf_module_parameter_definition.tool_policies JSON array
 }
 
 export interface ModuleParameterDefinition extends ParameterDefinitionBase {
