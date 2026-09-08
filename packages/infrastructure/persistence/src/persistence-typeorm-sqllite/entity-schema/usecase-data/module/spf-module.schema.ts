@@ -24,7 +24,6 @@ export interface SpfModuleBase {
   definitionSystemId: number;
   fileSystemId: number;
 }
-
 export interface SpfModuleRow extends EntityBaseRow, SpfModuleBase {
   // persistence-only relations (optional)
   subgraph?: SubgraphRow;

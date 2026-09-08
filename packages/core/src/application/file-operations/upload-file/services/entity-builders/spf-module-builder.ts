@@ -840,7 +840,7 @@ export class SpfModuleBuilder {
 
     for (const staticPort of controlPort.staticPorts) {
       const intentSystemIds =
-        staticPort.supportedIntents?.map(intent => intent.id) ?? [];
+        staticPort.intents?.map(intent => intent.id) ?? [];
 
       controlPorts.push(
         new ControlPort({

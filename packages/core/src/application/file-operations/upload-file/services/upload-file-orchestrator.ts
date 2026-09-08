@@ -5,6 +5,9 @@
 
 import type {UnitOfWork} from '../../../ports/persistence/unit-of-work.js';
 import type {BulkImportRepository} from '../../../ports/persistence/repositories/bulk-import/bulk-import.repository.js';
+import type {Subgraph} from '../../../../domain/entities/usecase-data/subgraph/subgraph.js';
+import type {SpfModule} from '../../../../domain/entities/usecase-data/module/spf-module.js';
+import type {UseCase} from '../../../../domain/entities/usecase-data/usecase/usecase.js';
 import type {BulkInsertResult} from '../../../ports/persistence/repositories/bulk-import/bulk-insert-result-types.js';
 import {EntityBuilderService} from './entity-builder-service.js';
 import {ForeignKeyMapper} from './foreign-key-mapper.js';
@@ -39,6 +42,7 @@ import {PARSED_CHUNK_TYPES} from '../../shared/constants/chunk-types.js';
 import type {DataLink} from '../../../../domain/entities/usecase-data/links/data-link.js';
 import type {ControlLink} from '../../../../domain/entities/usecase-data/links/control-link.js';
 import type {Subsystem} from '../../../../domain/entities/usecase-data/subsystem/subsystem.js';
+import {UiSwitchesResolver} from './ui-switches-resolver.js';
 
 /**
  * Large block size for ID reservation to cover all entities in a file upload.
@@ -80,6 +84,10 @@ export interface UploadOrchestratorResult {
    * Undefined if header chunk was not found or failed to parse.
    */
   headerData?: AcdbHeaderData;
+  /** Switches JSON with systemId-keyed references, ready to store on the file record. */
+  uiSwitchesJson?: string;
+  /** Raw srsMetadata JSON for pass-through storage on the file record. */
+  uiSrsMetadataJson?: string;
 }
 
 export class UploadFileOrchestrator {
@@ -93,6 +101,15 @@ export class UploadFileOrchestrator {
   private parsedAcdb: ParsedAcdb | null = null;
   private parsedAwsp: ParsedAwsp | null = null;
   private currentFileId: number = 0;
+
+  // UI-metadata extras resolved after entity insertions
+  private uiSwitchesJson: string | undefined = undefined;
+  private uiSrsMetadataJson: string | undefined = undefined;
+
+  // Entity arrays accumulated during build phases, used for reviewed-at collection
+  private builtSubgraphs: Subgraph[] = [];
+  private builtSpfModules: SpfModule[] = [];
+  private builtUsecases: UseCase[] = [];
 
   /**
    * DATA_LOSS issues collected during bulk-insert.
@@ -291,7 +308,37 @@ export class UploadFileOrchestrator {
       issues: this.issueCollector.getIssues(),
       dataLossIssues: [...this.dataLossIssues],
       headerData: this.extractHeaderData(),
+      uiSwitchesJson: this.uiSwitchesJson,
+      uiSrsMetadataJson: this.uiSrsMetadataJson,
     };
+  }
+
+  /**
+   * Phase 7b: Resolve UI-metadata extras after all entity insertions.
+   * Switches references are translated from instanceId to systemId.
+   * srsMetadata is stored as raw JSON pass-through.
+   */
+  private resolveUiMetadataExtras(): void {
+    const uiMetadata = this.parsedAwsp?.getUiMetadata();
+    if (!uiMetadata) return;
+
+    if (uiMetadata.switches && uiMetadata.switches.length > 0) {
+      const resolver = new UiSwitchesResolver(this.logger);
+      this.uiSwitchesJson = resolver.resolve(
+        uiMetadata.switches,
+        this.foreignKeyMapper,
+      );
+    }
+
+    if (uiMetadata.srsMetadata) {
+      try {
+        this.uiSrsMetadataJson = JSON.stringify(
+          uiMetadata.srsMetadata.toJSON(),
+        );
+      } catch {
+        // Non-fatal: pass-through failure logs silently
+      }
+    }
   }
 
   /**
@@ -416,6 +463,13 @@ export class UploadFileOrchestrator {
 
       // Phase 7: Build and Insert Usecases (depend on all value definitions)
       await this.buildAndInsertUsecases(bulkRepo);
+
+      // Phase 7c: Build and insert entity reviewed-at side-table rows
+      await this.buildAndInsertReviewedAtRows(bulkRepo);
+
+      // Phase 7b: Resolve and store UI-metadata extras (switches, srsMetadata)
+      // Runs after all module/link insertions so ForeignKeyMapper is fully populated.
+      this.resolveUiMetadataExtras();
 
       // Phase 8: Insert Configuration (no dependencies — just needs fileId)
       await this.insertConfiguration(bulkRepo);
@@ -1067,6 +1121,9 @@ export class UploadFileOrchestrator {
     // Collect build issues
     this.issueCollector.addIssues(result.issues);
 
+    // Store built entities for reviewed-at collection
+    this.builtSubgraphs = result.entities;
+
     if (result.entities.length > 0) {
       // Insert subgraphs and capture result
       const insertResult = await bulkRepo.insertSubgraphs(result.entities);
@@ -1168,6 +1225,9 @@ export class UploadFileOrchestrator {
 
     // Collect build issues
     this.issueCollector.addIssues(result.issues);
+
+    // Store built entities for reviewed-at collection
+    this.builtSpfModules = result.entities;
 
     if (result.entities.length > 0) {
       // Insert SPF Modules (with CKVs already attached)
@@ -1422,6 +1482,9 @@ export class UploadFileOrchestrator {
       this.profiler?.snapshot(MEMORY_SNAPSHOTS.AFTER_USECASE_BUILD),
     );
 
+    // Store built entities for reviewed-at collection
+    this.builtUsecases = usecases;
+
     if (usecases.length > 0) {
       // Profile insertion phase
       this.profiler?.start(PROFILER_OPERATIONS.USECASE_INSERT);
@@ -1456,6 +1519,31 @@ export class UploadFileOrchestrator {
             .join('\n\t'),
         });
       }
+    }
+  }
+
+  private async buildAndInsertReviewedAtRows(
+    bulkRepo: BulkImportRepository,
+  ): Promise<void> {
+    const rows = this.builderService.buildEntityReviewedAt(
+      this.currentFileId,
+      this.parsedAwsp?.getUiMetadata(),
+      this.builtSubgraphs,
+      this.builtSpfModules,
+      this.builtUsecases,
+    );
+    if (rows.length === 0) return;
+    const result = await bulkRepo.insertEntityReviewedAt(rows);
+    if (!result.ok) {
+      this.logger?.logError({
+        msg: 'reviewed_at_insertion_failed',
+        description: `Failed to insert some reviewed-at rows: ${result.errors.length} failures`,
+        component: 'UploadFileOrchestrator',
+        tag: 'database-persistence',
+        error: result.errors
+          .map(e => `${e.message}\n\t\tDetails: ${e.details}`)
+          .join('\n\t'),
+      });
     }
   }
 
