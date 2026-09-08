@@ -75,8 +75,8 @@ function flattenModuleParameters(
   for (const module of modules) {
     for (const param of module.parameters) {
       allCalIdEntries.push({
-        moduleInstanceId: module.moduleInstanceId,
-        paramId: param.parameterId,
+        moduleInstanceId: module.moduleInstanceNaturalId,
+        paramId: param.parameterNaturalId,
       });
     }
   }
@@ -154,7 +154,7 @@ function addGlobalPersistentIIDsByType(
       if (!pidTypeMap.has(param.pidType)) {
         pidTypeMap.set(param.pidType, new Set());
       }
-      pidTypeMap.get(param.pidType)!.add(module.moduleInstanceId);
+      pidTypeMap.get(param.pidType)!.add(module.moduleInstanceNaturalId);
     }
   }
 
@@ -217,7 +217,7 @@ export const AudioCalibrationChunkBuilder = {
     // Create ONE SubgraphLookupEntry per subgraph
     for (const sgData of input.audioCalibrationData) {
       const sgLutEntry: SubgraphLookupEntry = {
-        subgraphId: sgData.subgraphId,
+        subgraphId: sgData.naturalId,
         calKeyTableEntries: [],
       };
 

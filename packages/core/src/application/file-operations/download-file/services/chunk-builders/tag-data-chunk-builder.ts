@@ -73,8 +73,8 @@ function flattenSortedEntries(modules: Module[]): FlatEntry[] {
   for (const mod of modules) {
     for (const param of mod.parameters) {
       entries.push({
-        moduleInstanceId: mod.moduleInstanceId,
-        parameterId: param.parameterId,
+        moduleInstanceId: mod.moduleInstanceNaturalId,
+        parameterId: param.parameterNaturalId,
         payload: param.payload,
       });
     }
@@ -145,7 +145,11 @@ export const TagDataChunkBuilder = {
       };
       const mtluOffset = chunk.addTagLutDataTable(table);
 
-      chunk.addTagIndexEntry(entry.subgraphId, entry.tagId, mtluOffset);
+      chunk.addTagIndexEntry(
+        entry.subgraphNaturalId,
+        entry.tagNaturalId,
+        mtluOffset,
+      );
     }
 
     return {chunk};
