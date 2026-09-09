@@ -9,8 +9,7 @@ import type {
   UnitOfWork,
   EditOptions,
   SpfModuleBase,
-  ExistingPayloadRow,
-  CkvPayloadUpdate,
+  PayloadUpdate,
 } from '@arc/core';
 import {
   CONFIGURATION_INCLUDES,
@@ -552,10 +551,10 @@ export class TypeOrmModuleRepository implements ModuleRepository {
     return row !== null;
   }
 
-  async getExistingCkvPayloads(
+  async getCkvPayloadEntries(
     spfModuleSystemId: number,
     ckvSystemId: number,
-  ): Promise<ExistingPayloadRow[]> {
+  ): Promise<{systemId: number; parameterSystemId: number}[]> {
     const sessionId = this.uow.getWriteContext().session.sessionId;
     const rows = await this.ckvOverlayFetcher.fetchPayloads(
       ckvSystemId,
@@ -568,10 +567,10 @@ export class TypeOrmModuleRepository implements ModuleRepository {
     }));
   }
 
-  async setCkvCalData(
+  async setCkvData(
     spfModuleSystemId: number,
     ckvSystemId: number,
-    payloadUpdates: CkvPayloadUpdate[],
+    payloadUpdates: PayloadUpdate[],
     uiPersistence?: string,
   ): Promise<void> {
     const {session, groupId} = this.uow.getWriteContext();
@@ -595,6 +594,74 @@ export class TypeOrmModuleRepository implements ModuleRepository {
           targetSystemId: ckvSystemId,
           aggregateId: spfModuleSystemId,
           delta: {uiPersistence: uiPersistence},
+        },
+        session.sessionId,
+        groupId,
+        this.manager,
+      );
+    }
+  }
+
+  async tagExists(
+    spfModuleSystemId: number,
+    tagSystemId: number,
+  ): Promise<boolean> {
+    const sessionId = this.uow.getWriteContext().session.sessionId;
+    return this.tkvOverlayFetcher.fetchModuleTagIdMap(
+      tagSystemId,
+      spfModuleSystemId,
+      sessionId,
+    );
+  }
+
+  async tkvExists(tkvSystemId: number): Promise<boolean> {
+    const sessionId = this.uow.getWriteContext().session.sessionId;
+    const row = await this.tkvOverlayFetcher.fetchTkv(tkvSystemId, sessionId);
+    return row !== null;
+  }
+
+  async getTkvPayloadEntries(
+    _moduleTagIdMapSystemId: number,
+    tkvSystemId: number,
+  ): Promise<{systemId: number; parameterSystemId: number}[]> {
+    const sessionId = this.uow.getWriteContext().session.sessionId;
+    const rows = await this.tkvOverlayFetcher.fetchPayloads(
+      tkvSystemId,
+      sessionId,
+    );
+    return rows.map(r => ({
+      systemId: r.systemId,
+      parameterSystemId: r.parameterSystemId,
+    }));
+  }
+
+  async setTkvData(
+    moduleTagIdMapSystemId: number,
+    tkvSystemId: number,
+    payloadUpdates: PayloadUpdate[],
+    uiPersistence?: string,
+  ): Promise<void> {
+    const {session, groupId} = this.uow.getWriteContext();
+    if (payloadUpdates.length > 0) {
+      await this.writer.writeDeltaBatch(
+        payloadUpdates.map(u => ({
+          targetTable: ENTITY_NAMES.TkvParameterPayload,
+          targetSystemId: u.payloadSystemId,
+          aggregateId: moduleTagIdMapSystemId,
+          delta: {payload: u.payload},
+        })),
+        session.sessionId,
+        groupId,
+        this.manager,
+      );
+    }
+    if (uiPersistence !== undefined) {
+      await this.writer.writeDelta(
+        {
+          targetTable: ENTITY_NAMES.Tkv,
+          targetSystemId: tkvSystemId,
+          aggregateId: moduleTagIdMapSystemId,
+          delta: {uiPersistence},
         },
         session.sessionId,
         groupId,

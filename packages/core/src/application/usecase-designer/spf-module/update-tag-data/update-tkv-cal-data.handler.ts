@@ -8,8 +8,8 @@ import {
   ResourceNotFoundException,
   InvalidOperationException,
 } from '../../../../shared/exceptions/index.js';
-import type {PutCkvCalDataCommand} from './put-ckv-cal-data.command.js';
-import type {PutCkvCalDataResult} from './put-ckv-cal-data-result.js';
+import type {UpdateTkvCalDataCommand} from './update-tkv-cal-data.command.js';
+import type {UpdateTkvCalDataResult} from './update-tkv-cal-data-result.js';
 import {serializeParameterData} from '../../shared/serialize-elements.js';
 import {mapDtoToParameterCalibration} from '../get-cal-data/ckv-cal-data-dto.js';
 import type {Logger} from '../../../../shared/types/logger.interface.js';
@@ -18,15 +18,15 @@ import type {PayloadEntry} from '../../../ports/persistence/repositories/module/
 import type {ParameterDefinitionBase} from '../../../ports/persistence/repositories/module/module-definition.repository.js';
 import type {ParameterElementDto} from '../dto/element-dto.js';
 
-export class PutCkvCalDataHandler {
+export class UpdateTkvCalDataHandler {
   constructor(
     private readonly uow: UnitOfWork,
     private readonly logger?: Logger,
   ) {}
 
   async handle(
-    command: PutCkvCalDataCommand,
-  ): Promise<Result<PutCkvCalDataResult>> {
+    command: UpdateTkvCalDataCommand,
+  ): Promise<Result<UpdateTkvCalDataResult>> {
     const {session, groupId} = this.uow.getWriteContext();
     const fileSystemId = session.fileSystemId;
     const moduleRepo = this.uow.getModuleRepository();
@@ -38,17 +38,22 @@ export class PutCkvCalDataHandler {
     );
     if (!spfModule) throw new ResourceNotFoundException('SpfModule not found');
 
-    // Step 2: validate CKV exists
-    const exists = await moduleRepo.ckvExists(
+    // Step 2a: validate tag map exists under this SpfModule
+    const tagMapExists = await moduleRepo.tagExists(
       command.spfModuleSystemId,
-      command.ckvSystemId,
+      command.tagSystemId,
     );
-    if (!exists) throw new ResourceNotFoundException('CKV not found');
+    if (!tagMapExists)
+      throw new ResourceNotFoundException('Tag (moduleTagIdMap) not found');
+
+    // Step 2b: validate TKV exists under this tag map
+    const tkvFound = await moduleRepo.tkvExists(command.tkvSystemId);
+    if (!tkvFound) throw new ResourceNotFoundException('TKV not found');
 
     // Step 3: fetch existing payloads, then fetch definitions for those parameter IDs
-    const payloadEntries = await moduleRepo.getCkvPayloadEntries(
-      command.spfModuleSystemId,
-      command.ckvSystemId,
+    const payloadEntries = await moduleRepo.getTkvPayloadEntries(
+      command.tagSystemId,
+      command.tkvSystemId,
     );
     const relevantParamSystemIds = payloadEntries.map(p => p.parameterSystemId);
     const definitions = await this.uow
@@ -77,9 +82,9 @@ export class PutCkvCalDataHandler {
     // Step 5: write
     await this.uow.startTransaction();
     try {
-      await moduleRepo.setCkvData(
-        command.spfModuleSystemId,
-        command.ckvSystemId,
+      await moduleRepo.setTkvData(
+        command.tagSystemId,
+        command.tkvSystemId,
         writeBatch,
         command.uiPersistence,
       );
@@ -87,11 +92,11 @@ export class PutCkvCalDataHandler {
     } catch (error) {
       if (this.uow.isInTransaction()) await this.uow.rollback();
       throw new Error(
-        `Calibration data write failed — transaction rolled back, no parameters were updated. Cause: ${(error as Error).message}`,
+        `Tag data write failed — transaction rolled back, no parameters were updated. Cause: ${(error as Error).message}`,
       );
     }
 
-    const data: PutCkvCalDataResult = {groupId, succeededParamSystemIds};
+    const data: UpdateTkvCalDataResult = {groupId, succeededParamSystemIds};
     return Result.ok(data);
   }
 

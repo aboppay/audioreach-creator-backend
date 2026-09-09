@@ -39,7 +39,9 @@ const MODULE_ID = 50;
 const DEF_ID = 200;
 const CONTAINER_ID = 300;
 const SUBGRAPH_ID = 400;
-const CKV_ID = 10;
+const TAG_DEF_ID = 500;
+const TAG_MAP_ID = 40;
+const TKV_ID = 60;
 const PARAM_DEF_ID = 20;
 const PAYLOAD_ID = 30;
 
@@ -106,17 +108,25 @@ async function seedParamDef(ds: DataSource) {
   );
 }
 
-async function seedCkv(ds: DataSource) {
+async function seedTagData(ds: DataSource) {
   await ds.query(
-    `INSERT INTO ckv (system_id, spf_module_system_id) VALUES (?, ?)`,
-    [CKV_ID, MODULE_ID],
+    `INSERT INTO tag_definitions (system_id, tag_id, name, is_voice, file_system_id) VALUES (?, 1, 'ch', 0, ?)`,
+    [TAG_DEF_ID, FILE_ID],
+  );
+  await ds.query(
+    `INSERT INTO module_tag_id_map (system_id, spf_module_system_id, tag_definition_system_id) VALUES (?, ?, ?)`,
+    [TAG_MAP_ID, MODULE_ID, TAG_DEF_ID],
+  );
+  await ds.query(
+    `INSERT INTO tkv (system_id, module_tag_id_map_system_id) VALUES (?, ?)`,
+    [TKV_ID, TAG_MAP_ID],
   );
 }
 
 async function seedPayload(ds: DataSource) {
   await ds.query(
-    `INSERT INTO ckv_parameter_payload (system_id, parameter_system_id, ckv_system_id, payload) VALUES (?, ?, ?, ?)`,
-    [PAYLOAD_ID, PARAM_DEF_ID, CKV_ID, Buffer.alloc(0)],
+    `INSERT INTO tkv_parameter_payload (system_id, parameter_system_id, tkv_system_id, payload) VALUES (?, ?, ?, ?)`,
+    [PAYLOAD_ID, PARAM_DEF_ID, TKV_ID, Buffer.alloc(0)],
   );
 }
 
@@ -144,7 +154,7 @@ function makeRepo(qr: QueryRunner, sessionId: number): TypeOrmModuleRepository {
   return new TypeOrmModuleRepository(writer, qr.manager, uow as never);
 }
 
-describe('TypeOrmModuleRepository — CKV cal data', () => {
+describe('TypeOrmModuleRepository — TKV cal data methods', () => {
   let ds: DataSource;
   let qr: QueryRunner;
   let sessionId: number;
@@ -161,7 +171,7 @@ describe('TypeOrmModuleRepository — CKV cal data', () => {
     await seedProjectAndFile(ds);
     await seedModule(ds);
     await seedParamDef(ds);
-    await seedCkv(ds);
+    await seedTagData(ds);
     sessionId = await seedSession(ds);
     qr = ds.createQueryRunner();
     await qr.connect();
@@ -170,105 +180,121 @@ describe('TypeOrmModuleRepository — CKV cal data', () => {
     await qr.release();
   });
 
-  it('getSpfModuleForValidation returns SpfModuleBase with all four fields', async () => {
-    const repo = makeRepo(qr, sessionId);
-    const result = await repo.getSpfModuleForValidation(MODULE_ID, FILE_ID);
-    expect(result).not.toBeNull();
-    expect(result!.systemId).toBe(MODULE_ID);
-    expect(result!.definitionSystemId).toBe(DEF_ID);
-    expect(result!.subgraphSystemId).toBe(SUBGRAPH_ID);
-    expect(result!.containerSystemId).toBe(CONTAINER_ID);
+  describe('tagExists', () => {
+    it('returns true when the tag map row is in DB', async () => {
+      const repo = makeRepo(qr, sessionId);
+      expect(await repo.tagExists(MODULE_ID, TAG_DEF_ID)).toBe(true);
+    });
+
+    it('returns false when spfModuleSystemId does not match', async () => {
+      const repo = makeRepo(qr, sessionId);
+      expect(await repo.tagExists(9999, TAG_DEF_ID)).toBe(false);
+    });
+
+    it('returns false when tagSystemId does not exist', async () => {
+      const repo = makeRepo(qr, sessionId);
+      expect(await repo.tagExists(MODULE_ID, 9999)).toBe(false);
+    });
   });
 
-  it('getSpfModuleForValidation returns null when module does not exist', async () => {
-    const repo = makeRepo(qr, sessionId);
-    const result = await repo.getSpfModuleForValidation(9999, FILE_ID);
-    expect(result).toBeNull();
+  describe('tkvExists', () => {
+    it('returns true when the TKV row is in DB', async () => {
+      const repo = makeRepo(qr, sessionId);
+      expect(await repo.tkvExists(TKV_ID)).toBe(true);
+    });
+
+    it('returns false when tkvSystemId does not exist', async () => {
+      const repo = makeRepo(qr, sessionId);
+      expect(await repo.tkvExists(9999)).toBe(false);
+    });
   });
 
-  it('ckvExists returns true when CKV exists', async () => {
-    const repo = makeRepo(qr, sessionId);
-    const result = await repo.ckvExists(MODULE_ID, CKV_ID);
-    expect(result).toBe(true);
+  describe('getTkvPayloadEntries', () => {
+    it('returns all payload rows for the TKV', async () => {
+      await seedPayload(ds);
+      const repo = makeRepo(qr, sessionId);
+      const rows = await repo.getTkvPayloadEntries(TAG_MAP_ID, TKV_ID);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].systemId).toBe(PAYLOAD_ID);
+      expect(rows[0].parameterSystemId).toBe(PARAM_DEF_ID);
+    });
+
+    it('returns empty array when no payload rows exist', async () => {
+      const repo = makeRepo(qr, sessionId);
+      const rows = await repo.getTkvPayloadEntries(TAG_MAP_ID, TKV_ID);
+      expect(rows).toHaveLength(0);
+    });
   });
 
-  it('ckvExists returns false when CKV does not exist', async () => {
-    const repo = makeRepo(qr, sessionId);
-    const result = await repo.ckvExists(MODULE_ID, 9999);
-    expect(result).toBe(false);
-  });
+  describe('setTkvData', () => {
+    it('writes edit_actions with aggregateId=moduleTagIdMapSystemId and correct base64 payload', async () => {
+      await seedPayload(ds);
+      const repo = makeRepo(qr, sessionId);
+      const payload = new Uint8Array([0xde, 0xad, 0xbe, 0xef]);
+      await repo.setTkvData(TAG_MAP_ID, TKV_ID, [
+        {payloadSystemId: PAYLOAD_ID, payload},
+      ]);
+      const rows: Array<{
+        target_table: string;
+        aggregate_id: number;
+        target_system_id: number;
+        new_value: string;
+        change_status: string;
+      }> = await ds.query(
+        `SELECT target_table, aggregate_id, target_system_id, new_value, change_status FROM edit_actions WHERE session_id = ?`,
+        [sessionId],
+      );
+      expect(rows).toHaveLength(1);
+      const row = rows[0];
+      expect(row.target_table).toBe(ENTITY_NAMES.TkvParameterPayload);
+      expect(row.aggregate_id).toBe(TAG_MAP_ID);
+      expect(row.target_system_id).toBe(PAYLOAD_ID);
+      expect(row.change_status).toBe(CHANGE_STATUS.Staged);
+      const delta = JSON.parse(row.new_value) as {payload: {__blob: string}};
+      expect(Buffer.from(delta.payload.__blob, 'base64')).toEqual(
+        Buffer.from(payload),
+      );
+    });
 
-  it('getCkvPayloadEntries returns rows with systemId and parameterSystemId', async () => {
-    await seedPayload(ds);
-    const repo = makeRepo(qr, sessionId);
-    const results = await repo.getCkvPayloadEntries(MODULE_ID, CKV_ID);
-    expect(results).toHaveLength(1);
-    expect(results[0].systemId).toBe(PAYLOAD_ID);
-    expect(results[0].parameterSystemId).toBe(PARAM_DEF_ID);
-  });
+    it('writes uiPersistence edit_action on Tkv row when provided', async () => {
+      const repo = makeRepo(qr, sessionId);
+      await repo.setTkvData(TAG_MAP_ID, TKV_ID, [], 'hello ui');
+      const rows: Array<{
+        target_table: string;
+        aggregate_id: number;
+        target_system_id: number;
+        new_value: string;
+      }> = await ds.query(
+        `SELECT target_table, aggregate_id, target_system_id, new_value FROM edit_actions WHERE session_id = ?`,
+        [sessionId],
+      );
+      expect(rows).toHaveLength(1);
+      const row = rows[0];
+      expect(row.target_table).toBe(ENTITY_NAMES.Tkv);
+      expect(row.aggregate_id).toBe(TAG_MAP_ID);
+      expect(row.target_system_id).toBe(TKV_ID);
+      const delta = JSON.parse(row.new_value) as {uiPersistence: string};
+      expect(delta.uiPersistence).toBe('hello ui');
+    });
 
-  it('setCkvData writes edit_actions with aggregateId=spfModuleSystemId and correct base64 payload', async () => {
-    await seedPayload(ds);
-    const repo = makeRepo(qr, sessionId);
-    const payload = new Uint8Array([0xde, 0xad, 0xbe, 0xef]);
-    await repo.setCkvData(MODULE_ID, CKV_ID, [
-      {payloadSystemId: PAYLOAD_ID, payload},
-    ]);
-    const rows: Array<{
-      target_table: string;
-      aggregate_id: number;
-      target_system_id: number;
-      new_value: string;
-      change_status: string;
-    }> = await ds.query(
-      `SELECT target_table, aggregate_id, target_system_id, new_value, change_status FROM edit_actions WHERE session_id = ?`,
-      [sessionId],
-    );
-    expect(rows).toHaveLength(1);
-    const row = rows[0];
-    expect(row.target_table).toBe(ENTITY_NAMES.CkvParameterPayload);
-    expect(row.aggregate_id).toBe(MODULE_ID);
-    expect(row.target_system_id).toBe(PAYLOAD_ID);
-    expect(row.change_status).toBe(CHANGE_STATUS.Staged);
-    const delta = JSON.parse(row.new_value) as {payload: {__blob: string}};
-    expect(Buffer.from(delta.payload.__blob, 'base64')).toEqual(
-      Buffer.from(payload),
-    );
-  });
+    it('does not write uiPersistence edit_action when uiPersistence is absent', async () => {
+      const repo = makeRepo(qr, sessionId);
+      await repo.setTkvData(TAG_MAP_ID, TKV_ID, []);
+      const rows: Array<unknown> = await ds.query(
+        `SELECT * FROM edit_actions WHERE session_id = ?`,
+        [sessionId],
+      );
+      expect(rows).toHaveLength(0);
+    });
 
-  it('setCkvData writes uiPersistence edit_action on Ckv row when provided', async () => {
-    const repo = makeRepo(qr, sessionId);
-    const uiPersistence = new Uint8Array([0x01, 0x02, 0x03]);
-    await repo.setCkvData(MODULE_ID, CKV_ID, [], uiPersistence);
-    const rows: Array<{
-      target_table: string;
-      aggregate_id: number;
-      target_system_id: number;
-      new_value: string;
-    }> = await ds.query(
-      `SELECT target_table, aggregate_id, target_system_id, new_value FROM edit_actions WHERE session_id = ?`,
-      [sessionId],
-    );
-    expect(rows).toHaveLength(1);
-    const row = rows[0];
-    expect(row.target_table).toBe(ENTITY_NAMES.Ckv);
-    expect(row.aggregate_id).toBe(MODULE_ID);
-    expect(row.target_system_id).toBe(CKV_ID);
-    const delta = JSON.parse(row.new_value) as {
-      uiPersistence: {__blob: string};
-    };
-    expect(Buffer.from(delta.uiPersistence.__blob, 'base64')).toEqual(
-      Buffer.from(uiPersistence),
-    );
-  });
-
-  it('setCkvData with empty payloadUpdates and uiPersistence only writes one edit_action', async () => {
-    const repo = makeRepo(qr, sessionId);
-    await repo.setCkvData(MODULE_ID, CKV_ID, [], new Uint8Array([0xff]));
-    const rows: Array<unknown> = await ds.query(
-      `SELECT * FROM edit_actions WHERE session_id = ?`,
-      [sessionId],
-    );
-    expect(rows).toHaveLength(1);
+    it('writes only uiPersistence edit_action when payload batch is empty', async () => {
+      const repo = makeRepo(qr, sessionId);
+      await repo.setTkvData(TAG_MAP_ID, TKV_ID, [], 'persist');
+      const rows: Array<unknown> = await ds.query(
+        `SELECT * FROM edit_actions WHERE session_id = ?`,
+        [sessionId],
+      );
+      expect(rows).toHaveLength(1);
+    });
   });
 });

@@ -107,6 +107,8 @@ import {DeleteProjectCommand} from '../../../project/delete/delete-project.comma
 import {DeleteProjectHandler} from '../../../project/delete/delete-project.handler.js';
 import {DeleteSpfModuleCommand} from '../../../usecase-designer/spf-module/delete/delete-spf-module.command.js';
 import {DeleteSpfModuleHandler} from '../../../usecase-designer/spf-module/delete/delete-spf-module.handler.js';
+import {UpdateTkvCalDataCommand} from '../../../usecase-designer/spf-module/update-tag-data/update-tkv-cal-data.command.js';
+import {UpdateTkvCalDataHandler} from '../../../usecase-designer/spf-module/update-tag-data/update-tkv-cal-data.handler.js';
 
 export interface CommandHandlerDependencies {
   uow: UnitOfWork;
@@ -267,6 +269,10 @@ export class CommandHandlerRegistry {
     });
     this.commandHandlerFactories.set(DeleteSpfModuleCommand, {
       create: deps => new DeleteSpfModuleHandler(deps.uow, deps.logger),
+    });
+
+    this.commandHandlerFactories.set(UpdateTkvCalDataCommand, {
+      create: deps => new UpdateTkvCalDataHandler(deps.uow, deps.logger),
     });
   }
 }

@@ -14,12 +14,12 @@ import type {KvData} from '../../../../../domain/entities/common/entities/kv-dat
 
 export type {SpfModuleBase} from '../../../../../domain/entities/usecase-data/module/spf-module.js';
 
-export interface ExistingPayloadRow {
+export interface PayloadEntry {
   systemId: number; // PK of CkvParameterPayload — matches param.systemId from client
   parameterSystemId: number; // FK → SpfModuleParameterDefinition.systemId
 }
 
-export interface CkvPayloadUpdate {
+export interface PayloadUpdate {
   payloadSystemId: number; // PK of CkvParameterPayload — used as targetSystemId in edit_actions
   payload: Uint8Array;
 }
@@ -122,15 +122,31 @@ export interface ModuleRepository {
 
   ckvExists(spfModuleSystemId: number, ckvSystemId: number): Promise<boolean>;
 
-  getExistingCkvPayloads(
+  getCkvPayloadEntries(
     spfModuleSystemId: number,
     ckvSystemId: number,
-  ): Promise<ExistingPayloadRow[]>;
+  ): Promise<PayloadEntry[]>;
 
-  setCkvCalData(
+  setCkvData(
     spfModuleSystemId: number,
     ckvSystemId: number,
-    payloadUpdates: CkvPayloadUpdate[],
+    payloadUpdates: PayloadUpdate[],
+    uiPersistence?: string,
+  ): Promise<void>;
+
+  tagExists(spfModuleSystemId: number, tagSystemId: number): Promise<boolean>;
+
+  tkvExists(tkvSystemId: number): Promise<boolean>;
+
+  getTkvPayloadEntries(
+    moduleTagIdMapSystemId: number,
+    tkvSystemId: number,
+  ): Promise<PayloadEntry[]>;
+
+  setTkvData(
+    moduleTagIdMapSystemId: number,
+    tkvSystemId: number,
+    payloadUpdates: PayloadUpdate[],
     uiPersistence?: string,
   ): Promise<void>;
 }

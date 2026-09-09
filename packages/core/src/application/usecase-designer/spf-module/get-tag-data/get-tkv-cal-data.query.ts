@@ -6,38 +6,36 @@ import {BaseQuery} from '../../../shared/base-query.js';
 import {parseId} from '../../shared/parse-id.js';
 
 /**
- * Query to retrieve calibration data for a specific CKV (Calibration Key-Value)
- * belonging to an SPF module.
+ * Query to retrieve tag data for a specific TKV (Tag Key-Value) bin
+ * belonging to an SPF module, scoped to a moduleTagIdMap entry (tagSystemId).
  *
  * All ID parameters are accepted as raw strings (as received from the HTTP layer)
  * and parsed to integers in the constructor. Decimal and hexadecimal (0x prefix)
  * notation are both supported. Throws `InvalidOperationException` if any value
- * cannot be parsed. The global exception filter maps this to HTTP 400 automatically.
- *
- * Dispatched by the controller and handled by `GetCkvCalibrationDataHandler`.
+ * cannot be parsed — the global exception filter maps this to HTTP 400.
  */
-export class GetCkvCalibrationDataQuery extends BaseQuery {
-  /** Project that owns the SPF module. */
+export class GetTkvCalibrationDataQuery extends BaseQuery {
   public readonly projectId: number;
-  /** System ID of the SPF module instance. */
   public readonly spfModuleSystemId: number;
-  /** System ID of the CKV to retrieve calibration data for. */
-  public readonly ckvSystemId: number;
-  /** Filter: only return data for these parameter system IDs; empty means all. */
+  /** moduleTagIdMapSystemId — PK of the module_tag_id_map row that owns this TKV. */
+  public readonly tagSystemId: number;
+  public readonly tkvSystemId: number;
+  /** PKs of tkv_parameter_payload rows to return. Empty = all payloads. */
   public readonly paramSystemIds: number[];
 
   constructor(
     projectIdStr: string,
     spfModuleSystemIdStr: string,
-    ckvSystemIdStr: string,
+    tagSystemIdStr: string,
+    tkvSystemIdStr: string,
     clientId: string,
-    /** Optional comma-separated list of parameter system IDs (decimal or hex). */
     paramSystemIdsStr?: string,
   ) {
     super(clientId);
     this.projectId = parseId(projectIdStr, 'projectId');
     this.spfModuleSystemId = parseId(spfModuleSystemIdStr, 'spfModuleSystemId');
-    this.ckvSystemId = parseId(ckvSystemIdStr, 'ckvSystemId');
+    this.tagSystemId = parseId(tagSystemIdStr, 'tagSystemId');
+    this.tkvSystemId = parseId(tkvSystemIdStr, 'tkvSystemId');
     this.paramSystemIds = paramSystemIdsStr
       ? paramSystemIdsStr
           .split(',')

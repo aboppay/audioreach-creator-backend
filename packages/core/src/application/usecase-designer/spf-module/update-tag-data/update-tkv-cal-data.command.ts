@@ -10,7 +10,7 @@ import type {ParameterDto} from '../dto/parameter-dto.js';
 import type {ParameterElementDto} from '../dto/element-dto.js';
 import {parseId} from '../../shared/parse-id.js';
 
-export class PutCkvCalDataCommand extends BaseCommand {
+export class UpdateTkvCalDataCommand extends BaseCommand {
   static override readonly requiresSession = true;
   static override readonly allowedModes: readonly SessionMode[] = [
     SESSION_MODE.Designer,
@@ -18,7 +18,8 @@ export class PutCkvCalDataCommand extends BaseCommand {
   ];
 
   public readonly spfModuleSystemId: number;
-  public readonly ckvSystemId: number;
+  public readonly tagSystemId: number;
+  public readonly tkvSystemId: number;
   public readonly parameters: Array<{
     systemId: number;
     elements: ParameterElementDto[];
@@ -27,13 +28,15 @@ export class PutCkvCalDataCommand extends BaseCommand {
 
   constructor(
     spfModuleSystemIdStr: string,
-    ckvSystemIdStr: string,
+    tagSystemIdStr: string,
+    tkvSystemIdStr: string,
     parameters: ParameterDto[],
     uiPersistence: string | undefined,
   ) {
     super();
     this.spfModuleSystemId = parseId(spfModuleSystemIdStr, 'spfModuleSystemId');
-    this.ckvSystemId = parseId(ckvSystemIdStr, 'ckvSystemId');
+    this.tagSystemId = parseId(tagSystemIdStr, 'tagSystemId');
+    this.tkvSystemId = parseId(tkvSystemIdStr, 'tkvSystemId');
     this.parameters = parameters.map(p => ({
       systemId: parseId(p.systemId, 'parameters[].systemId'),
       elements: p.elements,

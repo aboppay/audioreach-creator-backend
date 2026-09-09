@@ -4,19 +4,19 @@
  */
 import type {QueryHandler} from '../../../orchestration/cqrs/queries/query-handler.js';
 import type {QueryServices} from '../../../ports/persistence/query-services/query-services.js';
-import type {GetCkvCalibrationDataQuery} from './get-ckv-cal-data.query.js';
+import type {GetTkvCalibrationDataQuery} from './get-tkv-cal-data.query.js';
 import type {ParameterPayloadReadModel} from '../../../ports/persistence/query-services/spf-module/ckv/ckv-read-model.js';
 import {ResourceNotFoundException} from '../../../../shared/exceptions/resource-not-found.exception.js';
 import type {Logger} from '../../../../shared/types/logger.interface.js';
 import {Result, RESULT_KIND} from '../../../shared/result/result.js';
 import {IssueFactory} from '../../../../shared/issues/factories.js';
-import type {CkvCalDataDto} from './ckv-cal-data-dto.js';
-import {mapCkvCalDataDto} from './ckv-cal-data-dto.js';
+import type {TkvCalDataDto} from './tkv-cal-data-dto.js';
+import {mapTkvCalDataDto} from './tkv-cal-data-dto.js';
 import {buildParameterModels} from '../../shared/build-parameter-models.js';
 
-export class GetCkvCalibrationDataHandler implements QueryHandler<
-  GetCkvCalibrationDataQuery,
-  Promise<Result<CkvCalDataDto>>
+export class GetTkvCalibrationDataHandler implements QueryHandler<
+  GetTkvCalibrationDataQuery,
+  Promise<Result<TkvCalDataDto>>
 > {
   constructor(
     private readonly queryServices: QueryServices,
@@ -24,8 +24,8 @@ export class GetCkvCalibrationDataHandler implements QueryHandler<
   ) {}
 
   async handle(
-    query: GetCkvCalibrationDataQuery,
-  ): Promise<Result<CkvCalDataDto>> {
+    query: GetTkvCalibrationDataQuery,
+  ): Promise<Result<TkvCalDataDto>> {
     const fileSystemId =
       await this.queryServices.projectQueryService.getFileIdByProjectId(
         query.projectId,
@@ -44,16 +44,16 @@ export class GetCkvCalibrationDataHandler implements QueryHandler<
     }
     const spfModule = spfModuleResult.data;
 
-    const [ckv, payloads] = await Promise.all([
-      this.queryServices.spfModuleQueryService.ckvQueryService.getCkv(
+    const [tkv, payloads] = await Promise.all([
+      this.queryServices.spfModuleQueryService.tkvQueryService.getTkv(
         fileSystemId,
         query.spfModuleSystemId,
-        query.ckvSystemId,
+        query.tkvSystemId,
       ),
-      this.queryServices.spfModuleQueryService.ckvQueryService.getCkvPayloads(
+      this.queryServices.spfModuleQueryService.tkvQueryService.getTkvPayloads(
         fileSystemId,
         query.spfModuleSystemId,
-        query.ckvSystemId,
+        query.tkvSystemId,
         query.paramSystemIds,
       ),
     ]);
@@ -68,9 +68,9 @@ export class GetCkvCalibrationDataHandler implements QueryHandler<
         relevantParamSystemIds,
       );
 
-    if (!ckv) {
+    if (!tkv) {
       throw new ResourceNotFoundException(
-        `Ckv with systemId ${query.ckvSystemId} not found`,
+        `Tkv with systemId ${query.tkvSystemId} not found`,
       );
     }
 
@@ -89,8 +89,7 @@ export class GetCkvCalibrationDataHandler implements QueryHandler<
       parameterDefinitions,
       this.logger,
     );
-
-    const dto = mapCkvCalDataDto(ckv, parameters);
+    const dto = mapTkvCalDataDto(tkv, parameters);
 
     if (missingParamSystemIds && missingParamSystemIds.length > 0) {
       const issues = missingParamSystemIds.map(id =>

@@ -173,6 +173,46 @@ export class TkvOverlayFetcher {
   }
 
   /**
+   * Returns the overlaid Tkv row for the given tkvSystemId.
+   * Returns null if the row does not exist or was deleted in the active session.
+   *
+   * Overlay actions are matched by targetSystemId — tkvSystemId is the table PK
+   * and is globally unique, so no aggregateId scoping is needed.
+   */
+  async fetchTkv(
+    tkvSystemId: number,
+    sessionId: number | null,
+  ): Promise<OverlaidTkv | null> {
+    const baseRow = (await this.manager
+      .getRepository(ENTITY_NAMES.Tkv)
+      .createQueryBuilder('tkv')
+      .leftJoinAndSelect('tkv.values', 'tkvValues')
+      .where('tkv.systemId = :tkvSystemId', {tkvSystemId})
+      .getOne()) as TkvRow | null;
+
+    if (sessionId === null) {
+      return baseRow ? this.toOverlaidTkv(baseRow) : null;
+    }
+
+    const tkvActions = await this.editActionsSvc.getByTable(
+      sessionId,
+      ENTITY_NAMES.Tkv,
+    );
+    const relevantActions = tkvActions.filter(
+      a => a.targetSystemId === tkvSystemId,
+    );
+
+    if (relevantActions.length === 0) {
+      return baseRow ? this.toOverlaidTkv(baseRow) : null;
+    }
+
+    const result = this.overlay.applyToSingle(baseRow, relevantActions);
+    return result
+      ? this.toOverlaidTkv({...result.effective, values: baseRow?.values ?? []})
+      : null;
+  }
+
+  /**
    * Returns overlaid TkvParameterPayload rows for the given TKV system ID.
    * Delegates entirely to the injected TkvParameterPayloadFetcher.
    */
@@ -183,6 +223,43 @@ export class TkvOverlayFetcher {
     return this.payloadFetcher.fetchMany(tkvSystemId, sessionId);
   }
 
+  /**
+   * Returns true if the module_tag_id_map row exists (in DB or session overlay),
+   * false if deleted in the active session or absent from the DB.
+   *
+   * Overlay aggregateId for ModuleTagIdMap = spfModuleSystemId.
+   */
+  async fetchModuleTagIdMap(
+    tagSystemId: number,
+    spfModuleSystemId: number,
+    sessionId: number | null,
+  ): Promise<boolean> {
+    const baseRow = await this.manager
+      .getRepository(ENTITY_NAMES.ModuleTagIdMap)
+      .findOne({
+        where: {tagDefinitionSystemId: tagSystemId, spfModuleSystemId},
+        select: ['systemId'],
+      });
+
+    if (baseRow === null) return false;
+
+    if (sessionId !== null) {
+      const actions = await this.editActionsSvc.getByAggregateAndTable(
+        sessionId,
+        spfModuleSystemId,
+        ENTITY_NAMES.ModuleTagIdMap,
+      );
+      const filteredActions = actions.filter(
+        a => a.targetSystemId === baseRow.systemId,
+      );
+      if (filteredActions.length > 0) {
+        return this.overlay.applyToSingle(null, filteredActions) !== null;
+      }
+    }
+
+    return true;
+  }
+
   // ── Private helpers ────────────────────────────────────────────────────────
 
   private toOverlaidTagMap(r: ModuleTagIdMapRow): OverlaidModuleTagIdMap {
@@ -190,5 +267,9 @@ export class TkvOverlayFetcher {
       ...r,
       tkvs: (r.tkvs ?? []).map(tkv => ({...tkv, values: tkv.values ?? []})),
     };
+  }
+
+  private toOverlaidTkv(r: TkvRow): OverlaidTkv {
+    return {...r, values: r.values ?? []};
   }
 }
