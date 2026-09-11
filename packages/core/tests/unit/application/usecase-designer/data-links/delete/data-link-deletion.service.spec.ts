@@ -38,6 +38,7 @@ function createFixture(options?: {
   routeSegments?: ReturnType<typeof segment>[];
 }) {
   const dataLinkRepository = {
+    findBySystemId: jest.fn().mockResolvedValue(null),
     findLinksConnectedToModule: jest
       .fn()
       .mockResolvedValue(options?.dataLinks ?? []),

@@ -10,6 +10,7 @@ import {
   Delete,
   Body,
   Param,
+  ParseIntPipe,
   UseGuards,
   UseInterceptors,
   HttpStatus,
@@ -31,7 +32,10 @@ import {
   CreateDataLinkCommand,
   DeleteDataLinkCommand,
   Result,
+  type ActiveSession,
 } from '@arc/core';
+import {SessionGuard} from '../../../../guards/session-guard.js';
+import {ArcSession} from '../../../../guards/arc-session.decorator.js';
 
 /**
  * Controller to support all data link related APIs for usecase design.
@@ -203,6 +207,7 @@ export class DataLinkController extends BaseController {
    * Delete a data link.
    * Returns the deleted link snapshot so the caller can undo the operation.
    */
+  @UseGuards(SessionGuard)
   @Delete(':dataLinkSystemId')
   @ApiParam({
     name: 'dataLinkSystemId',
@@ -213,7 +218,7 @@ export class DataLinkController extends BaseController {
   @ApiDocumentationWithExample({
     summary: 'Delete a data link',
     description:
-      'Deletes a data link by systemId. Returns the deleted link snapshot for undo support.',
+      'Deletes a data link by systemId in an active Designer session. The canonical link and its resolved aggregate segments are removed. Returns the deleted link snapshot for undo support.',
     responses: [
       {
         status: HttpStatus.OK,
@@ -222,7 +227,11 @@ export class DataLinkController extends BaseController {
       },
       {
         status: HttpStatus.NOT_FOUND,
-        description: 'Project or data link not found',
+        description: 'Project-scoped data link not found',
+      },
+      {
+        status: HttpStatus.FORBIDDEN,
+        description: 'An active Designer session is required',
       },
       {
         status: HttpStatus.INTERNAL_SERVER_ERROR,
@@ -231,21 +240,14 @@ export class DataLinkController extends BaseController {
     ],
   })
   async deleteDataLink(
-    @Param('projectId') projectId: string,
-    @Param('dataLinkSystemId') dataLinkSystemId: string,
+    @Param('projectId') _projectId: string,
+    @Param('dataLinkSystemId', ParseIntPipe) dataLinkSystemId: number,
+    @ArcSession() session: ActiveSession,
   ): Promise<ApiResult<DataLinkResponseDto>> {
-    console.log(
-      'Deleting data link:',
-      dataLinkSystemId,
-      'in project:',
-      projectId,
+    const deleted = await this.commandBus.execute<DataLinkResponseDto>(
+      new DeleteDataLinkCommand(dataLinkSystemId),
+      session,
     );
-
-    const command = new DeleteDataLinkCommand(
-      Number.parseInt(dataLinkSystemId, 10),
-    );
-
-    const deleted = await this.commandBus.execute<DataLinkResponseDto>(command);
     return toApiResult(Result.ok(deleted));
   }
 }

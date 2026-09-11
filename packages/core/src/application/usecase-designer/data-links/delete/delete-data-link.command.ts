@@ -4,8 +4,15 @@
  */
 
 import {BaseCommand} from '../../../shared/base-command.js';
+import {SESSION_MODE} from '../../../shared/change-vocabulary.js';
+import type {SessionMode} from '../../../shared/change-vocabulary.js';
 
 export class DeleteDataLinkCommand extends BaseCommand {
+  static override readonly requiresSession = true;
+  static override readonly allowedModes: readonly SessionMode[] = [
+    SESSION_MODE.Designer,
+  ];
+
   constructor(public readonly dataLinkSystemId: number) {
     super();
   }

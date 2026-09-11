@@ -228,6 +228,69 @@ describe('TypeOrmDataLinkRepository (integration)', () => {
     expect(await repo.getLinksByPortSystemIds([], FILE_ID)).toEqual([]);
   });
 
+  it('returns a canonical data link by system ID within the active file', async () => {
+    await seedDataLink(ds, 500, PORT_SRC, PORT_DST);
+
+    const result = await makeRepo(qr, sessionId).findBySystemId(500, FILE_ID);
+
+    expect(result).toMatchObject({
+      systemId: 500,
+      sourceNodeSystemId: NODE_A,
+      destinationNodeSystemId: NODE_B,
+      sourcePortSystemId: PORT_SRC,
+      destinationPortSystemId: PORT_DST,
+    });
+  });
+
+  it('returns null for another file or a session-deleted link', async () => {
+    await seedDataLink(ds, 500, PORT_SRC, PORT_DST);
+    await qr.manager.getRepository(EditActionSchema).insert({
+      sessionId,
+      aggregateId: 500,
+      targetSystemId: 500,
+      targetTable: ENTITY_NAMES.DataLink,
+      operation: CHANGE_OPERATION.Delete,
+      fieldPath: '$',
+      newValue: null,
+      source: SOURCE.Manual,
+      changeStatus: CHANGE_STATUS.Staged,
+      groupId: 'delete-group',
+      linkedEntityGroupId: null,
+    });
+
+    await expect(
+      makeRepo(qr, sessionId).findBySystemId(500, FILE_ID + 1),
+    ).resolves.toBeNull();
+    await expect(
+      makeRepo(qr, sessionId).findBySystemId(500, FILE_ID),
+    ).resolves.toBeNull();
+  });
+
+  it('returns effective values from a session update', async () => {
+    await seedDataLink(ds, 500, PORT_SRC, PORT_DST);
+    await qr.manager.getRepository(EditActionSchema).insert({
+      sessionId,
+      aggregateId: 500,
+      targetSystemId: 500,
+      targetTable: ENTITY_NAMES.DataLink,
+      operation: CHANGE_OPERATION.Update,
+      fieldPath: 'sourceNodeSystemId',
+      newValue: 999,
+      source: SOURCE.Manual,
+      changeStatus: CHANGE_STATUS.Staged,
+      groupId: 'update-group',
+      linkedEntityGroupId: null,
+    });
+
+    await expect(
+      makeRepo(qr, sessionId).findBySystemId(500, FILE_ID),
+    ).resolves.toMatchObject({
+      systemId: 500,
+      sourceNodeSystemId: 999,
+      destinationNodeSystemId: NODE_B,
+    });
+  });
+
   it('returns links whose src port is in the list', async () => {
     await seedDataLink(ds, 999, PORT_SRC, PORT_DST);
     const repo = makeRepo(qr, sessionId);

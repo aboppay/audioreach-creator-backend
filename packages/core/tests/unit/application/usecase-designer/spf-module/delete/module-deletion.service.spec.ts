@@ -87,6 +87,7 @@ function createFixture(options?: {
     deleteSubgraph: jest.fn(),
   };
   const dataLinkRepository = {
+    findBySystemId: jest.fn().mockResolvedValue(null),
     findLinksConnectedToModule: jest
       .fn()
       .mockResolvedValue(options?.dataLinks ?? []),

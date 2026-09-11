@@ -79,6 +79,20 @@ export class TypeOrmDataLinkRepository implements DataLinkRepository {
     return this.writer;
   }
 
+  async findBySystemId(
+    dataLinkSystemId: number,
+    fileSystemId: number,
+  ): Promise<DataLink | null> {
+    const sessionId = this.uow.getWriteContext().session.sessionId;
+    const rows = await this.linkFetcher.loadDataLinkRows(
+      fileSystemId,
+      sessionId,
+      {systemId: dataLinkSystemId},
+    );
+    const row = rows.at(0);
+    return row ? baseToDataLink(row) : null;
+  }
+
   async findLinksConnectedToModule(
     moduleSystemId: number,
     fileSystemId: number,

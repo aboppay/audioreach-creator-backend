@@ -99,7 +99,10 @@ function makeDefRepo(
 }
 
 function makeLinkRepo(): DataLinkRepository {
-  return {getLinksByPortSystemIds: jest.fn().mockResolvedValue([])};
+  return {
+    findBySystemId: jest.fn().mockResolvedValue(null),
+    getLinksByPortSystemIds: jest.fn().mockResolvedValue([]),
+  } as DataLinkRepository;
 }
 
 function makeControlLinkRepo(): ControlLinkRepository {
@@ -409,6 +412,7 @@ describe('PatchSpfModuleHandler', () => {
       findModuleForPatch: jest.fn().mockResolvedValue(module),
     });
     const dataLinkRepo: DataLinkRepository = {
+      findBySystemId: jest.fn().mockResolvedValue(null),
       getLinksByPortSystemIds: jest.fn().mockResolvedValue([
         {linkSystemId: 10, portSystemId: 1},
         {linkSystemId: 11, portSystemId: 2},

@@ -16,6 +16,11 @@ export interface SubsystemDataRouteContext {
 }
 
 export interface DataLinkRepository {
+  findBySystemId(
+    dataLinkSystemId: number,
+    fileSystemId: number,
+  ): Promise<DataLink | null>;
+
   findLinksConnectedToModule(
     moduleSystemId: number,
     fileSystemId: number,

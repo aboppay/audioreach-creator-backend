@@ -13,6 +13,7 @@ import type {ComponentsReadModel} from '../../../ports/persistence/query-service
 import type {SpfModuleReadModel} from '../../../ports/persistence/query-services/spf-module/spf-module-read-model.js';
 import type {DataLinkReadModel} from '../../../ports/persistence/query-services/link/data-link-read-model.js';
 import type {ControlLinkReadModel} from '../../../ports/persistence/query-services/link/control-link-read-model.js';
+import {LINK_TYPE} from '../../../../domain/entities/usecase-data/links/link-type.js';
 import type {
   ComponentsWithSubsystemsReadModel,
   SubsystemNodeReadModel,
@@ -127,7 +128,7 @@ export function mapDataLink(
     sourcePortSystemId: String(l.sourcePortSystemId),
     destinationSystemId: String(l.destinationNodeSystemId),
     destinationPortSystemId: String(l.destinationPortSystemId),
-    isInterUsecase: false,
+    isInterUsecase: l.linkType === LINK_TYPE.InterUsecase,
   };
 }
 
