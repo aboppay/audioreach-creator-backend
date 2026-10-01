@@ -174,7 +174,7 @@ export class TypeOrmSubsystemRepository implements SubsystemRepository {
   ): Promise<Map<number, number | null>> {
     const rows = await this.manager
       .createQueryBuilder()
-      .select(['n.systemId', 'n.parentId'])
+      .select(['n.systemId', 'n.parentSystemId'])
       .from(ENTITY_NAMES.Node, 'n')
       .where('n.fileSystemId = :fileSystemId', {fileSystemId})
       .getRawMany<{n_system_id: number; n_parent_id: number | null}>();

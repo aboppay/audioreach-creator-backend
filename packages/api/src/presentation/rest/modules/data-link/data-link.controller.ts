@@ -25,6 +25,8 @@ import {ApiResult} from '../../common/dto/api-response/api-result.dto.js';
 import {PartialSuccessInterceptor} from '../../common/interceptors/partial-success.interceptor.js';
 import {toApiResult} from '../../common/result/to-api-result.js';
 import {ClientId} from '../../../../decorators/client-id.decorator.js';
+import {ArcSession} from '../../../../guards/arc-session.decorator.js';
+import {SessionGuard} from '../../../../guards/session-guard.js';
 import {parseModulePortLinkFilter} from '../../common/utils/subgraph-peer-link-filter.js';
 import {CreateDataLinkRequest} from './dto/request/create-data-link-request.dto.js';
 import {DataLinkWithUsecasesResponseDto} from '../usecase/dto/data-link-with-usecases.dto.js';
@@ -38,6 +40,7 @@ import {
   CreateDataLinkWithSubsystemsCommand,
   DeleteDataLinkCommand,
   Result,
+  type ActiveSession,
   GetDataLinksByModulePortQuery,
   type DataLinkWithUsecasesDto,
   type ComponentCollectionWithSubsystemsDto as ComponentCollectionWithSubsystemsDtoType,
@@ -132,6 +135,7 @@ export class DataLinkController extends BaseController {
    * Stores all link segments in DB; returns ComponentsResponseDto.
    */
   @Post()
+  @UseGuards(SessionGuard)
   @ApiDocumentationWithExample({
     summary: 'Create a new data link',
     description:
@@ -160,6 +164,7 @@ export class DataLinkController extends BaseController {
   async createDataLink(
     @Param('projectId') projectId: string,
     @Body() createDto: CreateDataLinkRequest,
+    @ArcSession() session: ActiveSession,
   ): Promise<ApiResult<ComponentsResponseDto>> {
     console.log(
       'Creating data link for project:',
@@ -177,7 +182,7 @@ export class DataLinkController extends BaseController {
     );
 
     const components =
-      await this.commandBus.execute<ComponentsResponseDto>(command);
+      await this.commandBus.execute<ComponentsResponseDto>(command, session);
     return toApiResult(Result.ok(components));
   }
 
@@ -187,6 +192,7 @@ export class DataLinkController extends BaseController {
    * Returns ComponentsWithSubsystemsResponseDto.
    */
   @Post('with-subsystems')
+  @UseGuards(SessionGuard)
   @ApiDocumentationWithExample({
     summary: 'Create a new data link (full view with subsystem hierarchy)',
     description:
@@ -215,6 +221,7 @@ export class DataLinkController extends BaseController {
   async createDataLinkWithSubsystems(
     @Param('projectId') projectId: string,
     @Body() createDto: CreateDataLinkWithSubsystemsRequest,
+    @ArcSession() session: ActiveSession,
   ): Promise<ApiResult<ComponentsWithSubsystemsResponseDto>> {
     console.log('Creating data link (with-subsystems) for project:', projectId);
 
@@ -229,6 +236,7 @@ export class DataLinkController extends BaseController {
     const components =
       await this.commandBus.execute<ComponentCollectionWithSubsystemsDtoType>(
         command,
+        session,
       );
     return toApiResult(Result.ok(components));
   }
@@ -238,6 +246,7 @@ export class DataLinkController extends BaseController {
    * Returns the deleted link snapshot so the caller can undo the operation.
    */
   @Delete(':dataLinkSystemId')
+  @UseGuards(SessionGuard)
   @ApiParam({
     name: 'dataLinkSystemId',
     required: true,
@@ -267,6 +276,7 @@ export class DataLinkController extends BaseController {
   async deleteDataLink(
     @Param('projectId') projectId: string,
     @Param('dataLinkSystemId') dataLinkSystemId: string,
+    @ArcSession() session: ActiveSession,
   ): Promise<ApiResult<DataLinkResponseDto>> {
     console.log(
       'Deleting data link:',
@@ -278,7 +288,10 @@ export class DataLinkController extends BaseController {
     const command = new DeleteDataLinkCommand(
       Number.parseInt(dataLinkSystemId, 10),
     );
-    const deleted = await this.commandBus.execute<DataLinkResponseDto>(command);
+    const deleted = await this.commandBus.execute<DataLinkResponseDto>(
+      command,
+      session,
+    );
     return toApiResult(Result.ok(deleted));
   }
 }
