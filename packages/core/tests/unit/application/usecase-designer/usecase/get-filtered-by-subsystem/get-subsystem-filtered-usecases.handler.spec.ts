@@ -11,11 +11,21 @@ import {
   RESULT_KIND,
 } from '../../../../../../src/application/shared/result/result.js';
 import type {QueryServices} from '../../../../../../src/application/ports/persistence/query-services/query-services.js';
-import type {UsecaseFilteredGkvData} from '../../../../../../src/application/services/subsystem-filtered-gkv-service.js';
+import type {
+  UsecaseFilteredGkvData,
+  UsecaseFilteredTopologyData,
+} from '../../../../../../src/application/services/subsystem-filtered-gkv-service.js';
 import {SubsystemFilteredGkvService} from '../../../../../../src/application/services/subsystem-filtered-gkv-service.js';
 
 const emptyData: UsecaseFilteredGkvData = {
   usecases: [],
+  subgraphSystemIdsByUsecase: new Map(),
+  subgraphNaturalIdsBySystemId: new Map(),
+  subsystems: [],
+  modules: [],
+};
+const emptyTopology: UsecaseFilteredTopologyData = {
+  usecaseSystemIds: [],
   subgraphSystemIdsByUsecase: new Map(),
   subgraphNaturalIdsBySystemId: new Map(),
   subsystems: [],
@@ -29,6 +39,9 @@ describe('GetSubsystemFilteredUsecasesHandler', () => {
         getFileIdByProjectId: jest.fn().mockResolvedValue(42),
       },
       useCaseQueryService: {
+        getUsecaseFilteredTopologyData: jest
+          .fn()
+          .mockResolvedValue(Result.ok(emptyTopology)),
         getUsecaseFilteredGkvData: jest.fn().mockResolvedValue(dataResult),
       },
     } as unknown as jest.Mocked<QueryServices>;
@@ -42,6 +55,7 @@ describe('GetSubsystemFilteredUsecasesHandler', () => {
       value: 0x10,
     };
     const coreService = {
+      findMatchingUsecaseIds: jest.fn().mockReturnValue(Result.ok([])),
       buildFilteredGkv: jest.fn().mockReturnValue(Result.ok([])),
     } as unknown as SubsystemFilteredGkvService;
 
@@ -55,8 +69,11 @@ describe('GetSubsystemFilteredUsecasesHandler', () => {
       services.projectQueryService.getFileIdByProjectId,
     ).toHaveBeenCalledWith(7);
     expect(
-      services.useCaseQueryService.getUsecaseFilteredGkvData,
+      services.useCaseQueryService.getUsecaseFilteredTopologyData,
     ).toHaveBeenCalledWith(42);
+    expect(
+      services.useCaseQueryService.getUsecaseFilteredGkvData,
+    ).toHaveBeenCalledWith(42, [], emptyTopology);
     expect(coreService.buildFilteredGkv).toHaveBeenCalledWith(
       emptyData,
       filter,

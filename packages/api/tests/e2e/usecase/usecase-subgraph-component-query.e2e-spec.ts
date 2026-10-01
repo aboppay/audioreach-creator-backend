@@ -269,6 +269,12 @@ describe('Usecase & Subgraph Component Query E2E', () => {
       expect(Array.isArray(data.dataLinks)).toBe(true);
       expect(Array.isArray(data.controlLinks)).toBe(true);
       expect(Array.isArray(data.subsystems)).toBe(true);
+      expect(data.subsystems.length).toBeGreaterThan(0);
+      expect(
+        collectSubsystems(data).some(
+          subsystem => subsystem.children.spfModules.length > 0,
+        ),
+      ).toBe(true);
     });
 
     it('subsystems expose natural IDs, owned ports, and recursive children', async () => {

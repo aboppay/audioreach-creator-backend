@@ -209,6 +209,72 @@ export class UsecaseOverlayFetcher {
     );
   }
 
+  /**
+   * Loads only the usecase topology needed by subsystem-filtered queries.
+   * GKV entries, categories, and subgraph pairs are deliberately excluded.
+   */
+  async getUsecaseSubgraphMap(
+    fileSystemId: number,
+    sessionId: number | null,
+  ): Promise<{
+    usecaseSystemIds: number[];
+    subgraphSystemIdsByUsecase: Map<number, number[]>;
+  }> {
+    const usecases = await this.fetchMany(fileSystemId, sessionId);
+    const ids = usecases.map(usecase => usecase.systemId);
+    const membership = await this.getSubgraphIdMap(ids, sessionId);
+    return {usecaseSystemIds: ids, subgraphSystemIdsByUsecase: membership};
+  }
+
+  /**
+   * Loads the response fields required by subsystem-filtered GKV grouping.
+   * Unlike getUsecases(), this does not load subgraph pairs.
+   */
+  async getUsecasesForFilteredGkv(
+    fileSystemId: number,
+    sessionId: number | null,
+    restrictToIds?: number[],
+    subgraphIdsByUsecase?: ReadonlyMap<number, readonly number[]>,
+  ): Promise<OverlaidUseCase[]> {
+    if (restrictToIds?.length === 0) return [];
+
+    const usecases = await this.fetchMany(
+      fileSystemId,
+      sessionId,
+      restrictToIds === undefined ? undefined : {systemId: restrictToIds},
+    );
+    if (usecases.length === 0) return [];
+
+    const ids = usecases.map(usecase => usecase.systemId);
+    const [gkvRows, catRows, sgIdMap] = await Promise.all([
+      this.gkvFetcher
+        ? this.gkvFetcher.fetchMany(ids, sessionId)
+        : Promise.resolve([] as UsecaseGkvValuesBase[]),
+      this.categoryFetcher
+        ? this.categoryFetcher.fetchMany(ids, sessionId)
+        : Promise.resolve([] as Array<{usecaseSystemId: number; name: string}>),
+      subgraphIdsByUsecase
+        ? Promise.resolve(
+            new Map(
+              ids.map(id => [id, [...(subgraphIdsByUsecase.get(id) ?? [])]]),
+            ),
+          )
+        : this.getSubgraphIdMap(ids, sessionId),
+    ]);
+    const gkvMap = this.groupGkvByUsecase(gkvRows);
+    const categoryMap = this.groupCategoriesByUsecase(catRows);
+
+    return usecases.map(uc =>
+      this.assembleUsecase(
+        uc,
+        gkvMap.get(uc.systemId) ?? [],
+        categoryMap.get(uc.systemId) ?? [],
+        sgIdMap.get(uc.systemId) ?? [],
+        [],
+      ),
+    );
+  }
+
   async getUsecasesFromActions(
     fileSystemId: number,
     usecaseSystemIds: readonly number[],

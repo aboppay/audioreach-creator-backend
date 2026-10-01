@@ -347,6 +347,7 @@ describe('DbSubsystemQueryService segment queries (integration)', () => {
       expect.objectContaining({
         systemId: SUBSYSTEM_ID,
         subsystemNaturalId: SUBSYSTEM_NATURAL_ID,
+        parentSystemId: undefined,
         dataPorts: [
           expect.objectContaining({
             systemId: SUBSYSTEM_DATA_PORT_ID,

@@ -16,7 +16,16 @@ export interface SubsystemFilteredModule {
   readonly parentSystemId?: number;
   readonly moduleNaturalId: number;
   readonly subgraphSystemId: number;
-  readonly containerSystemId: number;
+  readonly containerNaturalId: number;
+}
+
+/** Minimal topology required to select usecases before loading their GKVs. */
+export interface UsecaseFilteredTopologyData {
+  readonly usecaseSystemIds: readonly number[];
+  readonly subgraphSystemIdsByUsecase: ReadonlyMap<number, readonly number[]>;
+  readonly subgraphNaturalIdsBySystemId: ReadonlyMap<number, number>;
+  readonly subsystems: readonly SubsystemReadModel[];
+  readonly modules: readonly SubsystemFilteredModule[];
 }
 
 export interface UsecaseFilteredGkvData {
@@ -65,6 +74,42 @@ type TopologyIndexes = {
 
 /** Applies subsystem-filtered GKV business rules to effective read-side data. */
 export class SubsystemFilteredGkvService {
+  findMatchingUsecaseIds(
+    data: UsecaseFilteredTopologyData,
+    filter?: FilterExpression,
+  ): ArcResult<number[]> {
+    const topologyByUsecase = this.buildTopologyForIds(
+      data.usecaseSystemIds,
+      data,
+    );
+    const knownSubsystemIds = new Set(
+      data.subsystems.flatMap(subsystem =>
+        subsystem.subsystemNaturalId === undefined
+          ? []
+          : [subsystem.subsystemNaturalId],
+      ),
+    );
+    const invalidSubsystemId = filter
+      ? findInvalidSubsystemId(filter, knownSubsystemIds)
+      : null;
+    if (invalidSubsystemId !== null) {
+      return Result.fail(
+        IssueFactory.parseError(
+          'INVALID_FILTER_VALUE',
+          `Filter references unknown subsystemId: ${invalidSubsystemId}`,
+        ),
+      );
+    }
+
+    return Result.ok(
+      data.usecaseSystemIds.filter(usecaseSystemId => {
+        const topology =
+          topologyByUsecase.get(usecaseSystemId) ?? emptyTopology();
+        return !filter || evaluateFilter(filter, topology);
+      }),
+    );
+  }
+
   buildFilteredGkv(
     data: UsecaseFilteredGkvData,
     filter?: FilterExpression,
@@ -124,11 +169,21 @@ export class SubsystemFilteredGkvService {
   private buildTopology(
     data: UsecaseFilteredGkvData,
   ): Map<number, UsecaseTopology> {
+    return this.buildTopologyForIds(
+      data.usecases.map(usecase => usecase.systemId),
+      data,
+    );
+  }
+
+  private buildTopologyForIds(
+    usecaseSystemIds: readonly number[],
+    data: UsecaseFilteredTopologyData | UsecaseFilteredGkvData,
+  ): Map<number, UsecaseTopology> {
     const indexes = createTopologyIndexes(data);
     return new Map(
-      data.usecases.map(usecase => [
-        usecase.systemId,
-        buildUsecaseTopology(usecase, data, indexes),
+      usecaseSystemIds.map(usecaseSystemId => [
+        usecaseSystemId,
+        buildUsecaseTopology(usecaseSystemId, data, indexes),
       ]),
     );
   }
@@ -184,7 +239,9 @@ export class SubsystemFilteredGkvService {
   }
 }
 
-function createTopologyIndexes(data: UsecaseFilteredGkvData): TopologyIndexes {
+function createTopologyIndexes(
+  data: UsecaseFilteredTopologyData | UsecaseFilteredGkvData,
+): TopologyIndexes {
   const modulesBySubgraph = new Map<number, SubsystemFilteredModule[]>();
   for (const module of data.modules) {
     const bucket = modulesBySubgraph.get(module.subgraphSystemId) ?? [];
@@ -214,12 +271,12 @@ function createTopologyIndexes(data: UsecaseFilteredGkvData): TopologyIndexes {
 }
 
 function buildUsecaseTopology(
-  usecase: UseCaseReadModel,
-  data: UsecaseFilteredGkvData,
+  usecaseSystemId: number,
+  data: UsecaseFilteredTopologyData | UsecaseFilteredGkvData,
   indexes: TopologyIndexes,
 ): UsecaseTopology {
   const subgraphSystemIds = new Set(
-    data.subgraphSystemIdsByUsecase.get(usecase.systemId) ?? [],
+    data.subgraphSystemIdsByUsecase.get(usecaseSystemId) ?? [],
   );
   const subgraphNaturalIds = new Set(
     [...subgraphSystemIds].flatMap(systemId => {
@@ -334,7 +391,7 @@ function evaluateFilter(
       return topology.modules.some(module => module.moduleNaturalId === value);
     case 'containerNaturalId':
       return topology.modules.some(
-        module => module.containerSystemId === value,
+        module => module.containerNaturalId === value,
       );
     default:
       return false;

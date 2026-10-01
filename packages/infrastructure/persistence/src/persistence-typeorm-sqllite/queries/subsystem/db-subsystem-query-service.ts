@@ -133,7 +133,7 @@ export class DbSubsystemQueryService implements SubsystemQueryService {
             systemId: subsystem.systemId,
             subsystemNaturalId: naturalId,
             name: subsystem.name,
-            parentSystemId: node.parentSystemId,
+            parentSystemId: node.parentSystemId ?? undefined,
             dataPorts: (dataPortsByNode.get(subsystem.systemId) ?? []).map(
               port => ({
                 systemId: port.systemId,

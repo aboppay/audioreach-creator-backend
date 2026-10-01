@@ -36,9 +36,24 @@ export class GetSubsystemFilteredUsecasesHandler implements QueryHandler<
         query.projectId,
       );
 
+    const topologyResult =
+      await this.queryServices.useCaseQueryService.getUsecaseFilteredTopologyData(
+        fileId,
+      );
+    if (topologyResult.kind === RESULT_KIND.Fail) return topologyResult;
+
+    const matchingIdsResult =
+      this.subsystemFilteredGkvService.findMatchingUsecaseIds(
+        topologyResult.data,
+        query.filter,
+      );
+    if (matchingIdsResult.kind === RESULT_KIND.Fail) return matchingIdsResult;
+
     const dataResult =
       await this.queryServices.useCaseQueryService.getUsecaseFilteredGkvData(
         fileId,
+        matchingIdsResult.data,
+        topologyResult.data,
       );
     if (dataResult.kind === RESULT_KIND.Fail) return dataResult;
 

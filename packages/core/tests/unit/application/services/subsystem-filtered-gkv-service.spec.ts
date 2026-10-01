@@ -44,7 +44,7 @@ function makeData(options: {
     parentSystemId?: number;
     subgraphSystemId: number;
     moduleNaturalId: number;
-    containerSystemId: number;
+    containerNaturalId: number;
   }>;
 }): UsecaseFilteredGkvData {
   return {
@@ -81,7 +81,7 @@ describe('SubsystemFilteredGkvService', () => {
           systemId: 100,
           subgraphSystemId: 50,
           moduleNaturalId: 7,
-          containerSystemId: 8,
+          containerNaturalId: 8,
         },
       ],
     });
@@ -116,14 +116,14 @@ describe('SubsystemFilteredGkvService', () => {
           parentSystemId: 10,
           subgraphSystemId: 50,
           moduleNaturalId: 7,
-          containerSystemId: 8,
+          containerNaturalId: 8,
         },
         {
           systemId: 200,
           parentSystemId: 30,
           subgraphSystemId: 60,
           moduleNaturalId: 9,
-          containerSystemId: 8,
+          containerNaturalId: 8,
         },
       ],
     });
@@ -162,7 +162,7 @@ describe('SubsystemFilteredGkvService', () => {
           parentSystemId: 20,
           subgraphSystemId: 50,
           moduleNaturalId: 7,
-          containerSystemId: 8,
+          containerNaturalId: 8,
         },
       ],
     });
@@ -190,13 +190,13 @@ describe('SubsystemFilteredGkvService', () => {
           parentSystemId: 10,
           subgraphSystemId: 50,
           moduleNaturalId: 7,
-          containerSystemId: 8,
+          containerNaturalId: 8,
         },
         {
           systemId: 200,
           subgraphSystemId: 60,
           moduleNaturalId: 9,
-          containerSystemId: 8,
+          containerNaturalId: 8,
         },
       ],
     });
@@ -215,6 +215,44 @@ describe('SubsystemFilteredGkvService', () => {
     if (result.kind !== 'OK') return;
     expect(result.data).toHaveLength(1);
     expect(result.data[0].usecaseSystemIds).toEqual([1]);
+  });
+
+  it('matches container filters using the container natural ID', () => {
+    const data = makeData({
+      usecases: [
+        {systemId: 1, subgraphSystemIds: [50], gkv: []},
+        {systemId: 2, subgraphSystemIds: [60], gkv: []},
+      ],
+      subsystems: [],
+      modules: [
+        {
+          systemId: 100,
+          subgraphSystemId: 50,
+          moduleNaturalId: 7,
+          containerNaturalId: 800,
+        },
+        {
+          systemId: 200,
+          subgraphSystemId: 60,
+          moduleNaturalId: 9,
+          containerNaturalId: 900,
+        },
+      ],
+    });
+
+    const result = service.findMatchingUsecaseIds(
+      {
+        ...data,
+        usecaseSystemIds: data.usecases.map(usecase => usecase.systemId),
+      },
+      {
+        type: 'condition',
+        field: 'containerNaturalId',
+        value: 800,
+      },
+    );
+
+    expect(result).toEqual(Result.ok([1]));
   });
 
   it('keeps usecases with differently ordered GKVs in separate groups', () => {
