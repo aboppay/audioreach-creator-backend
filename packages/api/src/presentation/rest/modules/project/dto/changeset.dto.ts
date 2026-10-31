@@ -4,15 +4,31 @@
  */
 
 import {ApiProperty} from '@nestjs/swagger';
-import {IsArray, ArrayNotEmpty, IsString} from 'class-validator';
+import {IsArray, ArrayNotEmpty, IsIn, Matches} from 'class-validator';
+import {
+  ISSUE_ENTITY_TYPE,
+  type IssueEntityType,
+} from '@arc/core';
 
 // Base DTOs
 export class ChangesetRequestDto {
-  @ApiProperty({description: 'Array of change IDs to process', type: [String]})
+  @ApiProperty({
+    description: 'Entity type whose pending changes to stage/unstage',
+    example: ISSUE_ENTITY_TYPE.UseCase,
+    enum: Object.values(ISSUE_ENTITY_TYPE),
+  })
+  @IsIn([ISSUE_ENTITY_TYPE.UseCase])
+  entityType!: IssueEntityType;
+
+  @ApiProperty({
+    description: 'Hex-encoded system IDs of the entities to stage/unstage',
+    example: ['0x0000002a'],
+    type: [String],
+  })
   @IsArray()
   @ArrayNotEmpty()
-  @IsString({each: true})
-  changeIds!: string[];
+  @Matches(/^0x[0-9a-fA-F]+$/i, {each: true})
+  systemIds!: string[];
 }
 
 export class ChangesetDto {
@@ -36,32 +52,16 @@ export class ChangesetDto {
 }
 
 // Stage-specific DTOs
-export class StageChangesRequestDto extends ChangesetRequestDto {
-  @ApiProperty({description: 'Array of change IDs to stage'})
-  declare changeIds: string[];
-}
+export class StageChangesRequestDto extends ChangesetRequestDto {}
 
-export class StageChangesResponseDto extends ChangesetDto {
-  @ApiProperty({description: 'Successfully staged change IDs'})
-  declare processedChangeIds: string[];
-
-  @ApiProperty({description: 'Change IDs that failed to stage'})
-  declare failedChangeIds: string[];
-}
+// Response shape TBD — temporarily empty so the controller compiles.
+export class StageChangesResponseDto {}
 
 // Unstage-specific DTOs
-export class UnstageChangesRequestDto extends ChangesetRequestDto {
-  @ApiProperty({description: 'Array of change IDs to unstage'})
-  declare changeIds: string[];
-}
+export class UnstageChangesRequestDto extends ChangesetRequestDto {}
 
-export class UnstageChangesResponseDto extends ChangesetDto {
-  @ApiProperty({description: 'Successfully unstaged change IDs'})
-  declare processedChangeIds: string[];
-
-  @ApiProperty({description: 'Change IDs that failed to unstage'})
-  declare failedChangeIds: string[];
-}
+// Response shape TBD — temporarily empty so the controller compiles.
+export class UnstageChangesResponseDto {}
 
 // Commit-specific DTOs
 // Commit always applies every staged action in the active session, so callers

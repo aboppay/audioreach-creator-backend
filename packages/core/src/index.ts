@@ -18,6 +18,8 @@ export {StartSessionCommand} from './application/edit-session/start-session/star
 export {EndSessionCommand} from './application/edit-session/end-session/end-session.command.js';
 export {ApplyChangesCommand} from './application/edit-session/apply-changes/apply-changes.command.js';
 export {DiscardChangesCommand} from './application/edit-session/discard-changes/discard-changes.command.js';
+export {StageChangesCommand} from './application/edit-session/stage-changes/stage-changes.command.js';
+export {UnstageChangesCommand} from './application/edit-session/unstage-changes/unstage-changes.command.js';
 export type {SessionResult} from './application/edit-session/session-types.js';
 
 // Shared errors

@@ -12,7 +12,6 @@ import {
   HttpCode,
   HttpStatus,
   InternalServerErrorException,
-  NotImplementedException,
   Param,
   Patch,
   Post,
@@ -47,6 +46,8 @@ import {
   EndSessionCommand,
   ApplyChangesCommand,
   DiscardChangesCommand,
+  StageChangesCommand,
+  UnstageChangesCommand,
   GetProjectsQuery,
   GetProjectQuery,
   UpdateProjectCommand,
@@ -1344,11 +1345,19 @@ export class ProjectController {
       ],
     },
   })
-  stageChanges(
+  @UseGuards(SessionGuard)
+  @HttpCode(HttpStatus.OK)
+  async stageChanges(
     @Param('projectId') _projectId: string,
-    @Body() _stageChangesRequest: StageChangesRequestDto,
-  ): ApiResult<StageChangesResponseDto> {
-    throw new NotImplementedException('stageChanges is not implemented yet');
+    @Body() body: StageChangesRequestDto,
+    @ArcSession() session: ActiveSession,
+  ): Promise<StageChangesResponseDto> {
+    const systemIds = body.systemIds.map(id => Number(id));
+    await this.commandBus.execute<Result<Record<string, never>>>(
+      new StageChangesCommand(body.entityType, systemIds),
+      session,
+    );
+    return {};
   }
 
   @Post('/:projectId/unstage-changes')
@@ -1407,11 +1416,19 @@ export class ProjectController {
       ],
     },
   })
-  unstageChanges(
+  @UseGuards(SessionGuard)
+  @HttpCode(HttpStatus.OK)
+  async unstageChanges(
     @Param('projectId') _projectId: string,
-    @Body() _unstageChangesRequest: UnstageChangesRequestDto,
-  ): ApiResult<UnstageChangesResponseDto> {
-    throw new NotImplementedException('unstageChanges is not implemented yet');
+    @Body() body: UnstageChangesRequestDto,
+    @ArcSession() session: ActiveSession,
+  ): Promise<UnstageChangesResponseDto> {
+    const systemIds = body.systemIds.map(id => Number(id));
+    await this.commandBus.execute<Result<Record<string, never>>>(
+      new UnstageChangesCommand(body.entityType, systemIds),
+      session,
+    );
+    return {};
   }
 
   @Post('/:projectId/commit-changes')

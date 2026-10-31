@@ -72,6 +72,10 @@ import {ApplyChangesCommand} from '../../../edit-session/apply-changes/apply-cha
 import {ApplyChangesHandler} from '../../../edit-session/apply-changes/apply-changes.handler.js';
 import {DiscardChangesCommand} from '../../../edit-session/discard-changes/discard-changes.command.js';
 import {DiscardChangesHandler} from '../../../edit-session/discard-changes/discard-changes.handler.js';
+import {StageChangesCommand} from '../../../edit-session/stage-changes/stage-changes.command.js';
+import {StageChangesHandler} from '../../../edit-session/stage-changes/stage-changes.handler.js';
+import {UnstageChangesCommand} from '../../../edit-session/unstage-changes/unstage-changes.command.js';
+import {UnstageChangesHandler} from '../../../edit-session/unstage-changes/unstage-changes.handler.js';
 import {PatchSpfModuleCommand} from '../../../usecase-designer/spf-module/patch/patch-spf-module.command.js';
 import {PatchSpfModuleHandler} from '../../../usecase-designer/spf-module/patch/patch-spf-module.handler.js';
 import {CreateModuleCommand} from '../../../usecase-designer/spf-module/create-module/create-module.command.js';
@@ -263,6 +267,14 @@ export class CommandHandlerRegistry {
 
     this.commandHandlerFactories.set(DiscardChangesCommand, {
       create: deps => new DiscardChangesHandler(deps.uow),
+    });
+
+    this.commandHandlerFactories.set(StageChangesCommand, {
+      create: deps => new StageChangesHandler(deps.uow),
+    });
+
+    this.commandHandlerFactories.set(UnstageChangesCommand, {
+      create: deps => new UnstageChangesHandler(deps.uow),
     });
 
     this.commandHandlerFactories.set(PatchSpfModuleCommand, {
