@@ -45,6 +45,10 @@ type SerializeResult =
   | {ok: true; value: Uint8Array}
   | {ok: false; error: string};
 
+type DefaultSerializeResult =
+  | {ok: true; value: Uint8Array; warnings: string[]}
+  | {ok: false; error: string};
+
 export function serializeParameterData(
   definition: {elementsStructure: string},
   inputElements: ElementData[],
@@ -431,7 +435,7 @@ function serializeStructArray(
 export function serializeDefaultParameterData(definition: {
   systemId: number;
   elementsStructure: string;
-}): SerializeResult {
+}): DefaultSerializeResult {
   let schema: DefinitionElement[];
   try {
     schema = convertParamDefinition(definition.elementsStructure);
@@ -440,12 +444,15 @@ export function serializeDefaultParameterData(definition: {
   }
   try {
     const parsedSoFar = new Map<string, number>();
-    const defaultInputs = buildDefaultElements(schema, parsedSoFar);
+    const warnings: string[] = [];
+    const defaultInputs = buildDefaultElements(schema, parsedSoFar, warnings);
     const syntheticDef = {
       systemId: definition.systemId,
       elementsStructure: definition.elementsStructure,
     };
-    return serializeParameterData(syntheticDef, defaultInputs);
+    const result = serializeParameterData(syntheticDef, defaultInputs);
+    if (!result.ok) return result;
+    return {...result, warnings};
   } catch (error) {
     return {
       ok: false,
@@ -457,20 +464,49 @@ export function serializeDefaultParameterData(definition: {
 function buildDefaultElements(
   schema: DefinitionElement[],
   parsedSoFar: Map<string, number>,
+  warnings: string[],
 ): ElementData[] {
-  return schema.map(def => buildDefaultElement(def, parsedSoFar));
+  return schema.map(def => buildDefaultElement(def, parsedSoFar, warnings));
+}
+
+function clampToSchemaRange(def: ConfigElement, value: string, warnings: string[]): string {
+  const numV = Number(value);
+  if (!Number.isFinite(numV)) return value;
+  const schemaMin = parseMinMax(def.min, def.dataType);
+  const schemaMax = parseMinMax(def.max, def.dataType);
+  if (schemaMin !== undefined && numV < schemaMin) {
+    warnings.push(
+      `Element "${def.name ?? ''}": defaultValue ${value} below min ${def.min}; clamped to ${schemaMin}`,
+    );
+    return String(schemaMin);
+  }
+  if (schemaMax !== undefined && numV > schemaMax) {
+    warnings.push(
+      `Element "${def.name ?? ''}": defaultValue ${value} above max ${def.max}; clamped to ${schemaMax}`,
+    );
+    return String(schemaMax);
+  }
+  return value;
 }
 
 function buildDefaultElement(
   def: DefinitionElement,
   parsedSoFar: Map<string, number>,
+  warnings: string[],
 ): ElementData {
   switch (def.elementType) {
     case PARAMETER_ELEMENT_TYPE.ConfigElement: {
       if (def.defaultValue === undefined) {
         throw new Error(`Missing defaultValue for element "${def.name ?? ''}"`);
       }
-      const value = def.defaultValue;
+      let value = def.defaultValue;
+      if (
+        def.dataType !== DATA_TYPE.Int64 &&
+        def.dataType !== DATA_TYPE.UInt64 &&
+        def.dataType !== DATA_TYPE.RawData
+      ) {
+        value = clampToSchemaRange(def, value, warnings);
+      }
       if (def.name !== undefined) {
         const numericValue = Number(value);
         if (Number.isFinite(numericValue)) {
@@ -485,7 +521,7 @@ function buildDefaultElement(
     case PARAMETER_ELEMENT_TYPE.Struct: {
       return {
         type: PARAMETER_ELEMENT_TYPE.Struct,
-        value: buildDefaultElements(def.elements, parsedSoFar),
+        value: buildDefaultElements(def.elements, parsedSoFar, warnings),
       } as StructData;
     }
     case PARAMETER_ELEMENT_TYPE.ElementArray:
@@ -494,7 +530,7 @@ function buildDefaultElement(
       return {
         type: PARAMETER_ELEMENT_TYPE.ElementArray,
         value: Array.from({length}, () =>
-          buildDefaultElement(def.template, parsedSoFar),
+          buildDefaultElement(def.template, parsedSoFar, warnings),
         ),
       } as ElementArrayData;
     }

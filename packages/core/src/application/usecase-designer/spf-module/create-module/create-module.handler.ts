@@ -9,12 +9,14 @@ import type {
   NaturalIdGenerationPort,
 } from '@arc/core';
 import {ResourceNotFoundException, NaturalIdType} from '@arc/core';
+import type {Logger} from '../../../../shared/types/logger.interface.js';
 import type {CommandHandler} from '../../../orchestration/cqrs/commands/command-handler.js';
 import {SpfModule} from '../../../../domain/entities/usecase-data/module/spf-module.js';
 import {DataPort} from '../../../../domain/entities/usecase-data/node/entities/data-port.js';
 import {ControlPort} from '../../../../domain/entities/usecase-data/node/entities/control-port.js';
 import {buildSubgraphWithDefaults} from '../../subgraph/build-subgraph-with-defaults.js';
 import {buildContainerWithDefaults} from '../../container/build-container-with-defaults.js';
+import {createZeroCkv} from '../shared/kv-seed-helpers.js';
 import type {CreateModuleCommand} from './create-module.command.js';
 
 export class CreateModuleHandler implements CommandHandler<
@@ -25,6 +27,7 @@ export class CreateModuleHandler implements CommandHandler<
     private readonly uow: UnitOfWork,
     private readonly idGeneration: IdGenerationPort,
     private readonly naturalIdGeneration: NaturalIdGenerationPort,
+    private readonly logger?: Logger,
   ) {}
 
   async handle(
@@ -124,26 +127,16 @@ export class CreateModuleHandler implements CommandHandler<
       // 8. Stage all rows atomically; groupId remains response correlation.
       await uow.getModuleRepository().createModule(module);
 
-      // Step 10: TODO(add-module-calibration-defaults) — zero CKV with default
-      // calibration parameter payloads for this module.
-      //
-      //   const calibParams = await defRepo.getParameterDefinitions(
-      //     definition.systemId,
-      //   );
-      //   if (calibParams.length > 0) {
-      //     const ckvSystemId = await this.idGeneration.getNextId(fileSystemId);
-      //     const kvData = new KvData({systemId: ckvSystemId, valueDefinitionSystemIds: [], uiPersistence: null});
-      //     for (const param of calibParams) {
-      //       const blob = serializeDefaultParameterData(param.elementsStructure);
-      //       const payloadSystemId = await this.idGeneration.getNextId(fileSystemId);
-      //       kvData.addParameterPayload(new ModuleParameterData({
-      //         systemId: payloadSystemId, paramDefintionSystemId: param.systemId, payload: blob,
-      //       }));
-      //     }
-      //     await uow.getModuleRepository().createCkv(kvData, moduleSystemId);
-      //   }
-      //
-      // See: docs/edit-crud/design/add-module-calibration-defaults-design.md §9 Step 10
+      // 10. Seed zero-CKV with default calibration parameters.
+      await createZeroCkv(
+        definition.systemId,
+        fileSystemId,
+        moduleSystemId,
+        uow.getModuleRepository(),
+        defRepo,
+        this.idGeneration,
+        this.logger,
+      );
 
       await uow.commit();
       return {groupId: uow.getWriteContext().groupId, moduleSystemId};
@@ -174,6 +167,7 @@ export class CreateModuleHandler implements CommandHandler<
           fileSystemId,
         },
         sgPropDefs,
+        this.logger,
       );
       for (const property of subgraph.properties) {
         property.systemId = await this.idGeneration.getNextId(fileSystemId);
@@ -220,6 +214,7 @@ export class CreateModuleHandler implements CommandHandler<
           fileSystemId,
         },
         ctrPropDefs,
+        this.logger,
       );
       for (const property of container.properties.values()) {
         property.systemId = await this.idGeneration.getNextId(fileSystemId);

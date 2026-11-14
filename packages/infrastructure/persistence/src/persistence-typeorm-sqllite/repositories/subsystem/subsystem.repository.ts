@@ -702,7 +702,6 @@ export class TypeOrmSubsystemRepository implements SubsystemRepository {
           isStatic: port.isStatic,
           name: port.name,
           nodeSystemId: subsystemSystemId,
-          fileSystemId: session.fileSystemId,
         },
         ...options,
       },

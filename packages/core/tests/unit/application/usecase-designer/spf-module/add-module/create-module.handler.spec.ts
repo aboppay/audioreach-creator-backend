@@ -6,7 +6,11 @@
 import {describe, it, expect, jest, beforeEach} from '@jest/globals';
 import {CreateModuleHandler} from '../../../../../../src/application/usecase-designer/spf-module/create-module/create-module.handler.js';
 import {CreateModuleCommand} from '../../../../../../src/application/usecase-designer/spf-module/create-module/create-module.command.js';
-import {PropertyDefinition, ResourceNotFoundException} from '@arc/core';
+import {
+  PropertyDefinition,
+  ResourceNotFoundException,
+  TOOL_POLICY,
+} from '@arc/core';
 import type {
   UnitOfWork,
   ModuleRepository,
@@ -50,6 +54,7 @@ function makeDefRepo(definition = makeDefinition()) {
   return {
     findBySystemId: jest.fn().mockResolvedValue(definition),
     findByDefIdAndProcId: jest.fn().mockResolvedValue(definition),
+    getParameterDefinitions: jest.fn().mockResolvedValue([]),
   } as unknown as ModuleDefinitionRepository;
 }
 
@@ -407,5 +412,59 @@ describe('CreateModuleHandler — failure paths', () => {
     ).rejects.toThrow('DB error');
     expect(uow.rollback).toHaveBeenCalled();
     expect(uow.commit).not.toHaveBeenCalled();
+  });
+});
+
+describe('CreateModuleHandler — zero-CKV seeding (Step 10)', () => {
+  beforeEach(() => {
+    idSeq = 100;
+  });
+
+  it('creates a zero-CKV when calibration params are present', async () => {
+    const moduleRepo = makeModuleRepo();
+    const defRepo = {
+      ...makeDefRepo(),
+      getParameterDefinitions: jest.fn().mockResolvedValue([
+        {
+          systemId: 500,
+          elementsStructure: JSON.stringify([
+            {
+              elementType: 'ConfigElement',
+              name: 'v',
+              dataType: 'UInt32',
+              defaultValue: '0',
+            },
+          ]),
+          toolPolicy: TOOL_POLICY.Calibration,
+        },
+      ]),
+    } as unknown as ModuleDefinitionRepository;
+    const uow = makeUow({moduleRepo, defRepo});
+    const handler = new CreateModuleHandler(
+      uow,
+      makeIdGen(),
+      makeNaturalIdGen(),
+    );
+
+    await handler.handle(new CreateModuleCommand(42, 1, null, null, null));
+
+    expect(moduleRepo.createCkv).toHaveBeenCalledTimes(1);
+  });
+
+  it('still creates a zero-CKV (empty params) when no calibration params are present', async () => {
+    const moduleRepo = makeModuleRepo();
+    const uow = makeUow({moduleRepo});
+    const handler = new CreateModuleHandler(
+      uow,
+      makeIdGen(),
+      makeNaturalIdGen(),
+    );
+
+    await handler.handle(new CreateModuleCommand(42, 1, null, null, null));
+
+    expect(moduleRepo.createCkv).toHaveBeenCalledTimes(1);
+    const [kvData] = (moduleRepo.createCkv as ReturnType<typeof jest.fn>).mock
+      .calls[0];
+    expect(kvData.parameterPayloads).toHaveLength(0);
   });
 });

@@ -109,7 +109,7 @@ export class ContainerInserter implements BulkInserter<Container> {
       rows.push({
         systemId,
         containerSystemId: entry.container.systemId,
-        propertySystemId: entry.prop.containerPropertyDefinitionSystemId,
+        propertySystemId: entry.prop.propertySystemId,
         payload: entry.prop.getPayloadCopy(),
       });
       contextBySystemId.set(systemId, {container: entry.container});

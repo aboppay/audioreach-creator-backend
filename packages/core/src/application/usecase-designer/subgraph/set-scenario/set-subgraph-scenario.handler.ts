@@ -23,6 +23,7 @@ import {
 import type {CommandHandler} from '../../../orchestration/cqrs/commands/command-handler.js';
 import type {UnitOfWork} from '../../../ports/persistence/unit-of-work.js';
 import type {IdGenerationPort} from '../../../ports/id-generation/id-generation.port.js';
+import type {Logger} from '../../../../shared/types/logger.interface.js';
 import type {SetSubgraphScenarioCommand} from './set-subgraph-scenario.command.js';
 import type {ScenarioChangeDto} from '../dto/subgraph-write-result-types.js';
 import type {SubgraphPropertyDefinition} from '../../../../domain/entities/definitions/subgraph/subgraph-property-definitions.js';
@@ -54,6 +55,7 @@ export class SetSubgraphScenarioHandler implements CommandHandler<
   constructor(
     private readonly uow: UnitOfWork,
     private readonly idGeneration: IdGenerationPort,
+    private readonly logger?: Logger,
   ) {}
 
   async handle(
@@ -302,6 +304,14 @@ export class SetSubgraphScenarioHandler implements CommandHandler<
         if (!serialized.ok) {
           throw new InvalidOperationException(serialized.error);
         }
+        for (const w of serialized.warnings) {
+          this.logger?.logWarn({
+            eventName: 'vcpm.parameter.defaultClamped',
+            description: `Parameter ${parameter.systemId}: ${w}`,
+            component: 'SetSubgraphScenarioHandler',
+            tag: 'vcpm',
+          });
+        }
         return {
           parameterSystemId: parameter.systemId,
           payload: serialized.value,
@@ -400,6 +410,14 @@ export class SetSubgraphScenarioHandler implements CommandHandler<
     if (!serialized.ok) {
       throw new InvalidOperationException(serialized.error);
     }
+    for (const w of serialized.warnings) {
+      this.logger?.logWarn({
+        eventName: 'subgraph.scenario.defaultClamped',
+        description: `Property ${definition.systemId}: ${w}`,
+        component: 'SetSubgraphScenarioHandler',
+        tag: 'subgraph',
+      });
+    }
     return serialized.value;
   }
 
@@ -446,6 +464,14 @@ export class SetSubgraphScenarioHandler implements CommandHandler<
         throw new InvalidOperationException(
           `Unable to generate default VSID payload: ${serialized.error}`,
         );
+      }
+      for (const w of serialized.warnings) {
+        this.logger?.logWarn({
+          eventName: 'subgraph.vsid.defaultClamped',
+          description: `VSID property ${vsidDef.systemId}: ${w}`,
+          component: 'SetSubgraphScenarioHandler',
+          tag: 'subgraph',
+        });
       }
 
       try {
